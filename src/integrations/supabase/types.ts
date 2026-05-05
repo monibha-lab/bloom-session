@@ -14,7 +14,248 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          blue_flames: number
+          created_at: string
+          current_streak: number
+          id: string
+          last_session_date: string | null
+          sessions_completed: number
+          stars: number
+          total_seconds: number
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          blue_flames?: number
+          created_at?: string
+          current_streak?: number
+          id: string
+          last_session_date?: string | null
+          sessions_completed?: number
+          stars?: number
+          total_seconds?: number
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          blue_flames?: number
+          created_at?: string
+          current_streak?: number
+          id?: string
+          last_session_date?: string | null
+          sessions_completed?: number
+          stars?: number
+          total_seconds?: number
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      session_members: {
+        Row: {
+          id: string
+          joined_at: string
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_members_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_results: {
+        Row: {
+          created_at: string
+          duration_seconds: number
+          flames_delta: number
+          id: string
+          session_id: string
+          stars_delta: number
+          succeeded: boolean
+          tasks_completed: number
+          tasks_total: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          duration_seconds?: number
+          flames_delta?: number
+          id?: string
+          session_id: string
+          stars_delta?: number
+          succeeded?: boolean
+          tasks_completed?: number
+          tasks_total?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          duration_seconds?: number
+          flames_delta?: number
+          id?: string
+          session_id?: string
+          stars_delta?: number
+          succeeded?: boolean
+          tasks_completed?: number
+          tasks_total?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_results_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sessions: {
+        Row: {
+          code: string | null
+          code_expires_at: string | null
+          created_at: string
+          duration_seconds: number
+          ended_at: string | null
+          host_id: string
+          id: string
+          mode: string
+          started_at: string | null
+          status: string
+          template_name: string | null
+          template_url: string | null
+          timer_type: string
+        }
+        Insert: {
+          code?: string | null
+          code_expires_at?: string | null
+          created_at?: string
+          duration_seconds?: number
+          ended_at?: string | null
+          host_id: string
+          id?: string
+          mode?: string
+          started_at?: string | null
+          status?: string
+          template_name?: string | null
+          template_url?: string | null
+          timer_type?: string
+        }
+        Update: {
+          code?: string | null
+          code_expires_at?: string | null
+          created_at?: string
+          duration_seconds?: number
+          ended_at?: string | null
+          host_id?: string
+          id?: string
+          mode?: string
+          started_at?: string | null
+          status?: string
+          template_name?: string | null
+          template_url?: string | null
+          timer_type?: string
+        }
+        Relationships: []
+      }
+      study_logs: {
+        Row: {
+          created_at: string
+          date: string
+          duration_seconds: number
+          id: string
+          session_id: string | null
+          succeeded: boolean
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date?: string
+          duration_seconds?: number
+          id?: string
+          session_id?: string | null
+          succeeded?: boolean
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          duration_seconds?: number
+          id?: string
+          session_id?: string | null
+          succeeded?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_logs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          id: string
+          position: number
+          session_id: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          session_id: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          session_id?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
