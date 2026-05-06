@@ -136,12 +136,12 @@ const Session = () => {
 
       {/* Top timer bar */}
       <header className="relative z-10 border-b border-border/60 bg-ivory/80 backdrop-blur">
-        <div className="container mx-auto py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <p className="font-serif text-xl text-coffee">FocusForge<span className="text-clay">.</span></p>
-            <span className="text-xs uppercase tracking-widest text-taupe">{session.mode === "solo" ? "Solo" : "Group"} · {session.timer_type}</span>
+        <div className="container mx-auto px-4 py-3 md:py-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 md:gap-4 min-w-0">
+            <p className="font-serif text-lg md:text-xl text-coffee">FocusForge<span className="text-clay">.</span></p>
+            <span className="text-[10px] md:text-xs uppercase tracking-widest text-taupe truncate">{session.mode === "solo" ? "Solo" : "Group"} · {session.timer_type}</span>
           </div>
-          <div className="font-serif text-3xl tabular-nums">{fmt(remainingSec)}</div>
+          <div className="font-serif text-2xl md:text-3xl tabular-nums order-3 md:order-none w-full md:w-auto text-center">{fmt(remainingSec)}</div>
           <Button variant="outline" size="sm" onClick={exitFail}>
             <X className="w-4 h-4" /> {session.host_id === user?.id ? "End" : "Leave"}
           </Button>
@@ -151,7 +151,7 @@ const Session = () => {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 grid lg:grid-cols-12 gap-6">
+      <main className="container mx-auto px-4 py-6 md:py-8 grid lg:grid-cols-12 gap-6">
         <section className="lg:col-span-8">
           <VoronoiCanvas members={members} tasks={tasks} templateUrl={session.template_url} />
         </section>
@@ -192,7 +192,7 @@ function VoronoiCanvas({ members, tasks, templateUrl }: { members: Member[]; tas
 
   useEffect(() => {
     const obs = new ResizeObserver(() => {
-      if (ref.current) setSize({ w: ref.current.clientWidth, h: Math.max(400, ref.current.clientWidth * 0.7) });
+      if (ref.current) setSize({ w: ref.current.clientWidth, h: Math.max(280, Math.min(600, ref.current.clientWidth * 0.7)) });
     });
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
@@ -375,13 +375,13 @@ function EndOverlay({ ok }: { ok: boolean }) {
                 </motion.div>
               ))}
             </div>
-            <h2 className="font-serif text-5xl text-coffee">A chapter complete.</h2>
+            <h2 className="font-serif text-3xl md:text-5xl text-coffee">A chapter complete.</h2>
             <p className="text-coffee/70 mt-3">Stars and progress recorded.</p>
           </>
         ) : (
           <>
             <motion.div animate={{ rotate: [0, -3, 3, 0], opacity: [1, 0.6, 0.3] }} transition={{ duration: 0.8 }}>
-              <h2 className="font-serif text-5xl text-destructive">The page tore.</h2>
+              <h2 className="font-serif text-3xl md:text-5xl text-destructive">The page tore.</h2>
             </motion.div>
             <p className="text-coffee/70 mt-3">A penalty has been recorded. Try again soon.</p>
           </>
