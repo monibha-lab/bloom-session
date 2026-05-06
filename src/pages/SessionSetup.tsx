@@ -88,21 +88,46 @@ const SessionSetup = () => {
     toast.success("Template uploaded");
   };
 
+  const showSbError = (label: string, error: any) => {
+    const parts = [
+      error?.message,
+      error?.details && `details: ${error.details}`,
+      error?.hint && `hint: ${error.hint}`,
+      error?.code && `code: ${error.code}`,
+    ].filter(Boolean).join(" · ");
+    toast.error(`${label}: ${parts || "unknown error"}`);
+    console.error(label, error);
+  };
+
+  const ensureProfile = async () => {
+    if (!user) return false;
+    const { data, error } = await supabase.from("profiles").select("id").eq("id", user.id).maybeSingle();
+    if (error) { showSbError("Profile lookup failed", error); return false; }
+    if (!data) {
+      const { error: insErr } = await supabase.from("profiles").insert({ id: user.id });
+      if (insErr) { showSbError("Profile creation failed", insErr); return false; }
+    }
+    return true;
+  };
+
   const proceedFromStep2 = async () => {
-    if (!user) return;
+    if (!user) return toast.error("Please sign in first");
+    if (!(await ensureProfile())) return;
     if (mode === "join") {
       const code = joinCode.trim().toUpperCase();
       if (code.length !== 6) return toast.error("Codes are 6 characters");
       const { data: session, error } = await supabase
         .from("sessions").select("*").eq("code", code).maybeSingle();
-      if (error || !session) return toast.error("Session not found");
+      if (error) return showSbError("Lookup failed", error);
+      if (!session) return toast.error("Session not found");
       if (session.status !== "lobby") return toast.error("That session has already started");
       if (session.code_expires_at && new Date(session.code_expires_at) < new Date()) return toast.error("That code has expired");
 
       const { count } = await supabase.from("session_members").select("*", { count: "exact", head: true }).eq("session_id", session.id);
       if ((count ?? 0) >= 6) return toast.error("Session is full");
 
-      await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
+      const { error: jErr } = await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
+      if (jErr) return showSbError("Join failed", jErr);
       setSessionId(session.id);
       setTemplateUrl(session.template_url ?? templateUrl);
       setTemplateName(session.template_name ?? templateName);
@@ -110,7 +135,6 @@ const SessionSetup = () => {
       return;
     }
 
-    // Create session as host
     const code = mode === "invite" ? generateCode() : null;
     const expiresAt = mode === "invite" ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null;
     const { data: session, error } = await supabase.from("sessions").insert({
@@ -121,9 +145,10 @@ const SessionSetup = () => {
       timer_type: timerType, duration_seconds: minutes * 60,
       status: "lobby",
     }).select().single();
-    if (error || !session) return toast.error(error?.message ?? "Failed");
+    if (error || !session) return showSbError("Session create failed", error);
 
-    await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
+    const { error: mErr } = await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
+    if (mErr) return showSbError("Adding host to session failed", mErr);
     setSessionId(session.id);
     if (code) setCreatedCode(code);
     setStep(3);
@@ -138,22 +163,22 @@ const SessionSetup = () => {
     const cleaned = tasks.map(t => t.trim()).filter(Boolean);
     if (cleaned.length < 1) return toast.error("Add at least one task");
     if (cleaned.length > 10) return toast.error("Max 10 tasks");
-    // Insert tasks
     const rows = cleaned.map((title, i) => ({ session_id: sessionId, user_id: user.id, title, position: i }));
     const { error } = await supabase.from("tasks").insert(rows);
-    if (error) return toast.error(error.message);
+    if (error) return showSbError("Saving tasks failed", error);
     setStep(4);
   };
 
   const startSession = async () => {
-    if (!sessionId || !user) return;
+    if (!sessionId || !user) return toast.error("No session in progress");
     const dur = timerType === "pomodoro" ? (25 * 4 + 5 * 3 + 15) * 60 : minutes * 60;
-    await supabase.from("sessions").update({
+    const { error } = await supabase.from("sessions").update({
       status: "active",
       timer_type: timerType,
       duration_seconds: dur,
       started_at: new Date().toISOString(),
     }).eq("id", sessionId);
+    if (error) return showSbError("Starting session failed", error);
     nav(`/session/${sessionId}`);
   };
 
