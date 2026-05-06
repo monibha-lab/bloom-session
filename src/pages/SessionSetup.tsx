@@ -65,12 +65,22 @@ const SessionSetup = () => {
   };
 
   const onUpload = async (file: File) => {
-    if (!user) return;
+    if (!user) return toast.error("You must be signed in to upload templates");
     if (!["image/jpeg", "image/png"].includes(file.type)) return toast.error("Only JPG or PNG please");
+    if (file.size > 5 * 1024 * 1024) return toast.error("Max file size is 5MB");
     setUploading(true);
+    // NOTE: The `templates` bucket is intentionally PUBLIC so template image URLs
+    // can render directly inside template cards and the session canvas (<image href>).
+    // Do not flip it to private — that will break image display.
     const path = `${user.id}/${Date.now()}-${file.name}`;
-    const { error } = await supabase.storage.from("templates").upload(path, file);
-    if (error) { setUploading(false); return toast.error(error.message); }
+    const { error } = await supabase.storage.from("templates").upload(path, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+    if (error) {
+      setUploading(false);
+      return toast.error(`Upload failed: ${error.message}`);
+    }
     const { data: pub } = supabase.storage.from("templates").getPublicUrl(path);
     setTemplateUrl(pub.publicUrl);
     setTemplateName(file.name);
