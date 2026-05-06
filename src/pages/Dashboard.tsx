@@ -47,14 +47,14 @@ const Dashboard = () => {
       <TopNav />
       <UsernameModal />
 
-      <main className="container mx-auto px-4 py-10 space-y-10">
-        <section className="flex flex-wrap items-end justify-between gap-6">
-          <div>
+      <main className="container mx-auto px-4 py-6 md:py-10 space-y-8 md:space-y-10">
+        <section className="flex flex-wrap items-end justify-between gap-4 md:gap-6">
+          <div className="min-w-0">
             <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-3">Your study desk</p>
-            <h1 className="font-serif text-5xl">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
+            <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl break-words">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
             <p className="text-coffee/70 mt-2">A quiet record of your focus.</p>
           </div>
-          <Button size="lg" onClick={() => nav("/session/setup")}>Start new session</Button>
+          <Button size="lg" onClick={() => nav("/session/setup")} className="w-full sm:w-auto">Start new session</Button>
         </section>
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -103,7 +103,7 @@ const Dashboard = () => {
                 <p className="text-taupe text-sm mt-1">Begin one to start your record.</p>
               </div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[420px]">
                 <thead className="text-taupe text-xs uppercase tracking-widest">
                   <tr><th className="text-left p-3">Date</th><th className="text-left p-3">Duration</th><th className="text-left p-3">Result</th></tr>
                 </thead>
@@ -116,7 +116,7 @@ const Dashboard = () => {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         </section>

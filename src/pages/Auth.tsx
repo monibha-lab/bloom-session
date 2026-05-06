@@ -50,15 +50,15 @@ const AuthPage = () => {
     <div className="min-h-screen relative bg-ivory text-coffee">
       <Ornaments variant="minimal" />
       <TopNav />
-      <main className="container mx-auto flex items-center justify-center py-16">
-        <div className="grid md:grid-cols-2 gap-10 max-w-4xl w-full items-center">
+      <main className="container mx-auto px-4 flex items-center justify-center py-10 md:py-16">
+        <div className="grid md:grid-cols-2 gap-8 md:gap-10 max-w-4xl w-full items-center">
           <div>
             <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-4">Sign in</p>
-            <h1 className="font-serif text-5xl leading-tight">Welcome back to your quiet desk.</h1>
+            <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl leading-tight">Welcome back to your quiet desk.</h1>
             <p className="text-coffee/70 mt-4 leading-relaxed">Pick up where you left off, or begin a new chapter of focused work.</p>
           </div>
 
-          <div className="editorial-panel bg-card p-8">
+          <div className="editorial-panel bg-card p-6 md:p-8">
             <div className="flex gap-2 mb-6 text-sm">
               <button onClick={() => setMode("signin")} className={`pb-1 border-b-2 ${mode === "signin" ? "border-coffee text-coffee" : "border-transparent text-taupe"}`}>Sign in</button>
               <button onClick={() => setMode("signup")} className={`pb-1 border-b-2 ${mode === "signup" ? "border-coffee text-coffee" : "border-transparent text-taupe"}`}>Create account</button>

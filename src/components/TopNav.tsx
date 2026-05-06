@@ -8,11 +8,11 @@ export function TopNav() {
   const nav = useNavigate();
   return (
     <header className="relative z-10 border-b border-border/60 bg-ivory/70 backdrop-blur-sm">
-      <div className="container mx-auto flex items-center justify-between py-4">
-        <Link to="/" className="font-serif text-2xl tracking-tight text-coffee">
+      <div className="container mx-auto flex items-center justify-between gap-2 px-4 py-3 md:py-4">
+        <Link to="/" className="font-serif text-xl md:text-2xl tracking-tight text-coffee">
           FocusForge<span className="text-clay">.</span>
         </Link>
-        <nav className="flex items-center gap-3">
+        <nav className="flex items-center gap-2 md:gap-3">
           {user && profile ? (
             <>
               <div className="hidden md:flex items-center gap-4 text-sm text-coffee/80">
@@ -20,7 +20,11 @@ export function TopNav() {
                 <span className="flex items-center gap-1"><Flame className="w-4 h-4 text-flame" /> {profile.blue_flames}</span>
                 {profile.username && <span className="text-coffee">@{profile.username}</span>}
               </div>
-              <Button variant="outline" size="sm" onClick={() => nav("/dashboard")}>Dashboard</Button>
+              <div className="flex md:hidden items-center gap-2 text-xs text-coffee/80">
+                <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5 text-star" /> {profile.stars}</span>
+                <span className="flex items-center gap-1"><Flame className="w-3.5 h-3.5 text-flame" /> {profile.blue_flames}</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => nav("/dashboard")} className="hidden sm:inline-flex">Dashboard</Button>
               <Button variant="ghost" size="sm" onClick={async () => { await signOut(); nav("/"); }}>Sign out</Button>
             </>
           ) : (
