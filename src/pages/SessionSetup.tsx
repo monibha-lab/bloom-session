@@ -372,10 +372,10 @@ const SessionSetup = () => {
 function ModeCard({ active, onClick, icon, title, body }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; body: string }) {
   return (
     <button onClick={onClick}
-      className={`editorial-panel text-left p-5 transition-all ${active ? "bg-coffee text-ivory border-coffee" : "bg-card hover:bg-blush"}`}>
-      <div className={active ? "text-clay" : "text-clay"}>{icon}</div>
+      className={`editorial-panel text-left p-5 transition-all text-coffee ${active ? "bg-card border-coffee -translate-y-1 shadow-[0_12px_30px_-10px_rgba(75,46,36,0.45)] ring-2 ring-coffee" : "bg-card hover:bg-blush hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-12px_rgba(75,46,36,0.35)]"}`}>
+      <div className="text-clay">{icon}</div>
       <p className="font-serif text-2xl mt-2">{title}</p>
-      <p className={`text-sm mt-1 ${active ? "text-ivory/80" : "text-coffee/70"}`}>{body}</p>
+      <p className="text-sm mt-1 text-coffee/70">{body}</p>
     </button>
   );
 }
