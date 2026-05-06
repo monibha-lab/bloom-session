@@ -289,22 +289,46 @@ function PersonTile({ member }: { member: Member }) {
   const streamRef = useRef<MediaStream | null>(null);
   const { user } = useAuth();
   const isMe = user?.id === member.user_id;
+  // Camera and mic are OFF by default for V1 (local-only, no streaming).
   const [cam, setCam] = useState(false);
   const [mic, setMic] = useState(false);
+  const [denied, setDenied] = useState(false);
+
+  const stopAll = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
 
   useEffect(() => {
     if (!isMe) return;
+    let cancelled = false;
     if (cam || mic) {
-      navigator.mediaDevices.getUserMedia({ video: cam, audio: mic }).then(s => {
-        streamRef.current = s;
-        if (videoRef.current && cam) videoRef.current.srcObject = s;
-      }).catch(() => { setCam(false); setMic(false); toast.error("Could not access camera/mic"); });
-    } else if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
+      navigator.mediaDevices.getUserMedia({ video: cam, audio: mic })
+        .then(s => {
+          if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
+          stopAll();
+          streamRef.current = s;
+          setDenied(false);
+          if (videoRef.current && cam) videoRef.current.srcObject = s;
+        })
+        .catch((err) => {
+          setCam(false); setMic(false);
+          if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+            setDenied(true);
+            toast.error("Camera/mic permission denied. Enable it in your browser settings.");
+          } else {
+            toast.error(`Could not access camera/mic: ${err?.message ?? "unknown"}`);
+          }
+        });
+    } else {
+      stopAll();
     }
-    return () => { streamRef.current?.getTracks().forEach(t => t.stop()); };
+    return () => { cancelled = true; };
   }, [cam, mic, isMe]);
+
+  // Stop all tracks when leaving the session room
+  useEffect(() => () => stopAll(), []);
 
   return (
     <div className="aspect-video bg-cocoa relative overflow-hidden border border-border/60">
@@ -318,12 +342,17 @@ function PersonTile({ member }: { member: Member }) {
       <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
         @{member.profile?.username ?? "guest"}{isMe && " (you)"}
       </div>
+      {isMe && denied && (
+        <div className="absolute inset-x-1 top-1 text-[10px] text-ivory bg-destructive/80 px-1.5 py-0.5 rounded-sm">
+          Permission denied — check browser settings
+        </div>
+      )}
       {isMe && (
         <div className="absolute top-1 right-1 flex gap-1">
-          <button onClick={() => setCam(c => !c)} className="bg-coffee/80 text-ivory p-1 rounded-sm">
+          <button onClick={() => setCam(c => !c)} title={cam ? "Turn camera off" : "Turn camera on"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
             {cam ? <Camera className="w-3 h-3" /> : <CameraOff className="w-3 h-3" />}
           </button>
-          <button onClick={() => setMic(c => !c)} className="bg-coffee/80 text-ivory p-1 rounded-sm">
+          <button onClick={() => setMic(c => !c)} title={mic ? "Mute mic" : "Unmute mic"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
             {mic ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
           </button>
         </div>
