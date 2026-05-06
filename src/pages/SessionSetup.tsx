@@ -189,19 +189,19 @@ const SessionSetup = () => {
       <Ornaments variant="minimal" />
       <TopNav />
 
-      <main className="container mx-auto px-4 py-10 max-w-4xl">
-        <div className="mb-8 flex items-center gap-3 text-xs uppercase tracking-widest text-taupe">
+      <main className="container mx-auto px-4 py-6 md:py-10 max-w-4xl">
+        <div className="mb-6 md:mb-8 flex items-center gap-2 md:gap-3 text-[10px] md:text-xs uppercase tracking-widest text-taupe overflow-x-auto">
           {stepLabels.map((label, i) => {
             const n = (i + 1) as Step;
             const active = step === n;
             const done = step > n;
             return (
-              <div key={label} className="flex items-center gap-2">
+              <div key={label} className="flex items-center gap-2 shrink-0">
                 <span className={`w-6 h-6 grid place-items-center rounded-sm border ${active ? "bg-coffee text-ivory border-coffee" : done ? "bg-clay text-ivory border-clay" : "border-border text-taupe"}`}>
                   {done ? <Check className="w-3 h-3" /> : i + 1}
                 </span>
                 <span className={active ? "text-coffee" : ""}>{label}</span>
-                {i < 3 && <span className="w-8 h-px bg-border mx-2" />}
+                {i < 3 && <span className="w-4 md:w-8 h-px bg-border mx-1 md:mx-2" />}
               </div>
             );
           })}
@@ -210,9 +210,9 @@ const SessionSetup = () => {
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.section key="s1" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-              <h1 className="font-serif text-4xl mb-2">Pick a template</h1>
+              <h1 className="font-serif text-3xl md:text-4xl mb-2">Pick a template</h1>
               <p className="text-coffee/70 mb-6">A scene that will reveal slowly as you complete each task.</p>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                 {TEMPLATES.map(t => (
                   <motion.button
                     key={t.id}
@@ -230,7 +230,7 @@ const SessionSetup = () => {
                 ))}
               </div>
 
-              <div className="mt-6 editorial-panel bg-card p-4 flex items-center justify-between">
+              <div className="mt-6 editorial-panel bg-card p-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-serif text-lg">Upload your own</p>
                   <p className="text-xs text-taupe">JPG or PNG, square works best</p>
@@ -250,8 +250,8 @@ const SessionSetup = () => {
 
           {step === 2 && (
             <motion.section key="s2" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-              <h1 className="font-serif text-4xl mb-6">Who's studying?</h1>
-              <div className="grid md:grid-cols-3 gap-4">
+              <h1 className="font-serif text-3xl md:text-4xl mb-6">Who's studying?</h1>
+              <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
                 <ModeCard active={mode === "solo"} onClick={() => setMode("solo")} icon={<User className="w-5 h-5" />} title="Solo Study" body="A quiet room of your own." />
                 <ModeCard active={mode === "invite"} onClick={() => setMode("invite")} icon={<Users className="w-5 h-5" />} title="Invite Friends" body="Up to six readers with a private code." />
                 <ModeCard active={mode === "join"} onClick={() => setMode("join")} icon={<Hash className="w-5 h-5" />} title="Join by Code" body="Enter a 6-character invitation." />
@@ -271,14 +271,14 @@ const SessionSetup = () => {
 
           {step === 3 && (
             <motion.section key="s3" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-              <h1 className="font-serif text-4xl mb-2">What will you read?</h1>
+              <h1 className="font-serif text-3xl md:text-4xl mb-2">What will you read?</h1>
               <p className="text-coffee/70 mb-6">Add 1–10 tasks. They lock when the session begins.</p>
 
               {createdCode && (
-                <div className="editorial-panel bg-blush p-4 mb-6 flex items-center justify-between">
+                <div className="editorial-panel bg-blush p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-widest text-taupe">Invitation code</p>
-                    <p className="font-serif text-3xl tracking-[0.3em] text-coffee">{createdCode}</p>
+                    <p className="font-serif text-2xl md:text-3xl tracking-[0.3em] text-coffee break-all">{createdCode}</p>
                   </div>
                   <p className="text-sm text-taupe">Expires in 30 minutes</p>
                 </div>
@@ -339,8 +339,8 @@ const SessionSetup = () => {
 
           {step === 4 && (
             <motion.section key="s4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-              <h1 className="font-serif text-4xl mb-6">Set your timer</h1>
-              <div className="grid md:grid-cols-2 gap-4">
+              <h1 className="font-serif text-3xl md:text-4xl mb-6">Set your timer</h1>
+              <div className="grid sm:grid-cols-2 gap-4">
                 <ModeCard active={timerType === "custom"} onClick={() => setTimerType("custom")} icon={<></>} title="Custom"
                   body="One quiet block from 10 minutes to 8 hours." />
                 <ModeCard active={timerType === "pomodoro"} onClick={() => setTimerType("pomodoro")} icon={<></>} title="Pomodoro"
