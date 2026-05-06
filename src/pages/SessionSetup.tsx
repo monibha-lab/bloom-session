@@ -296,7 +296,30 @@ const SessionSetup = () => {
               <div className="space-y-2">
                 {tasks.map((t, i) => (
                   <div key={i} className="flex gap-2">
-                    <Input value={t} onChange={(e) => updateTask(i, e.target.value)} placeholder={`Task ${i + 1}`} className="bg-ivory" />
+                    <Input
+                      value={t}
+                      onChange={(e) => updateTask(i, e.target.value)}
+                      placeholder={`Task ${i + 1}`}
+                      className="bg-ivory"
+                      autoFocus={i === tasks.length - 1}
+                      data-task-index={i}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (!t.trim()) return;
+                          if (i === tasks.length - 1 && tasks.length < 10) {
+                            addTask();
+                            setTimeout(() => {
+                              const next = document.querySelector<HTMLInputElement>(`[data-task-index="${i + 1}"]`);
+                              next?.focus();
+                            }, 0);
+                          } else {
+                            const next = document.querySelector<HTMLInputElement>(`[data-task-index="${i + 1}"]`);
+                            next?.focus();
+                          }
+                        }
+                      }}
+                    />
                     {tasks.length > 1 && <Button variant="ghost" size="icon" onClick={() => removeTask(i)}><X className="w-4 h-4" /></Button>}
                   </div>
                 ))}
