@@ -37,11 +37,13 @@ const AuthPage = () => {
   };
 
   const google = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+    const { lovable } = await import("@/integrations/lovable");
+    const result = await lovable.auth.signInWithOAuth("google", {
+      redirect_uri: `${window.location.origin}/dashboard`,
     });
-    if (error) toast.error(error.message);
+    if (result.error) toast.error((result.error as any)?.message ?? "Google sign-in failed");
+    // If result.redirected, the browser is navigating to Google.
+    // Otherwise, session is set and the useEffect above will redirect to /dashboard.
   };
 
   return (
