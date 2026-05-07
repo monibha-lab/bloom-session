@@ -375,9 +375,37 @@ const SessionSetup = () => {
                 </div>
               )}
 
+              {mode === "invite" && (
+                <div className="mt-8 editorial-panel bg-card p-4">
+                  <p className="text-xs uppercase tracking-widest text-taupe mb-3">Session readiness</p>
+                  <ul className="space-y-2 text-sm">
+                    {members.map(m => {
+                      const count = memberTaskCounts[m.user_id] ?? 0;
+                      const ready = count > 0;
+                      return (
+                        <li key={m.user_id} className="flex items-center justify-between">
+                          <span>@{m.profile?.username ?? "guest"}{m.user_id === user?.id && " (you)"}</span>
+                          <span className={ready ? "text-olive" : "text-taupe italic"}>
+                            {ready ? `Ready · ${count} task${count > 1 ? "s" : ""}` : "Awaiting tasks…"}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {createdCode && <p className="text-xs text-taupe mt-3">Share code <span className="font-serif tracking-widest text-coffee">{createdCode}</span> with friends.</p>}
+                </div>
+              )}
+
               <div className="mt-8 flex justify-between">
                 <Button variant="outline" onClick={() => setStep(3)}>Back</Button>
-                <Button onClick={startSession}>Begin session</Button>
+                {(() => {
+                  const allReady = mode === "solo" || (members.length > 0 && members.every(m => (memberTaskCounts[m.user_id] ?? 0) > 0));
+                  return (
+                    <Button onClick={startSession} disabled={!allReady} title={!allReady ? "Waiting for everyone to submit tasks" : undefined}>
+                      {allReady ? "Begin session" : "Waiting for members…"}
+                    </Button>
+                  );
+                })()}
               </div>
             </motion.section>
           )}
