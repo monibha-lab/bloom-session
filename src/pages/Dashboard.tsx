@@ -24,6 +24,12 @@ const Dashboard = () => {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get("code");
+    if (c) setJoinCode(c.toUpperCase().slice(0, 6));
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
     (async () => {
       const { data } = await supabase
