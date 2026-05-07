@@ -234,17 +234,11 @@ const SessionSetup = () => {
           {step === 2 && (
             <motion.section key="s2" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
               <h1 className="font-serif text-3xl md:text-4xl mb-6">Who's studying?</h1>
-              <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <ModeCard active={mode === "solo"} onClick={() => setMode("solo")} icon={<User className="w-5 h-5" />} title="Solo Study" body="A quiet room of your own." />
                 <ModeCard active={mode === "invite"} onClick={() => setMode("invite")} icon={<Users className="w-5 h-5" />} title="Invite Friends" body="Up to six readers with a private code." />
-                <ModeCard active={mode === "join"} onClick={() => setMode("join")} icon={<Hash className="w-5 h-5" />} title="Join by Code" body="Enter a 6-character invitation." />
               </div>
-              {mode === "join" && (
-                <div className="mt-6 max-w-sm">
-                  <Label>6-character code</Label>
-                  <Input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} maxLength={6} className="bg-ivory text-2xl tracking-[0.5em] font-serif" />
-                </div>
-              )}
+              <p className="text-xs text-taupe mt-4">Joining someone else's session? Use the join code on your dashboard.</p>
               <div className="mt-8 flex justify-between">
                 <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
                 <Button onClick={proceedFromStep2}>Continue</Button>
