@@ -267,8 +267,19 @@ const SessionSetup = () => {
                   <div>
                     <p className="text-xs uppercase tracking-widest text-taupe">Invitation code</p>
                     <p className="font-serif text-2xl md:text-3xl tracking-[0.3em] text-coffee break-all">{createdCode}</p>
+                    <p className="text-xs text-taupe mt-1">Expires in 30 minutes</p>
                   </div>
-                  <p className="text-sm text-taupe">Expires in 30 minutes</p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => {
+                      navigator.clipboard.writeText(createdCode);
+                      toast.success("Code copied");
+                    }}><Copy className="w-4 h-4" /> Copy code</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const link = `${window.location.origin}/dashboard?code=${createdCode}`;
+                      navigator.clipboard.writeText(link);
+                      toast.success("Invite link copied");
+                    }}><Copy className="w-4 h-4" /> Copy link</Button>
+                  </div>
                 </div>
               )}
 
@@ -278,6 +289,25 @@ const SessionSetup = () => {
                   {members.map(m => (
                     <span key={m.user_id} className="px-2 py-1 bg-sand rounded-sm text-coffee">@{m.profile?.username ?? "guest"}</span>
                   ))}
+                </div>
+              )}
+
+              {mode === "invite" && (
+                <div className="mb-6">
+                  <Label className="text-xs uppercase tracking-widest text-taupe">Your task visibility</Label>
+                  <div className="mt-2 inline-flex border border-border bg-card overflow-hidden">
+                    <button type="button" onClick={() => setVisibility("public")}
+                      className={`px-4 py-2 text-sm flex items-center gap-2 transition-all ${visibility === "public" ? "bg-coffee text-ivory" : "text-coffee hover:bg-blush"}`}>
+                      <Eye className="w-4 h-4" /> Public
+                    </button>
+                    <button type="button" onClick={() => setVisibility("secret")}
+                      className={`px-4 py-2 text-sm flex items-center gap-2 transition-all border-l border-border ${visibility === "secret" ? "bg-coffee text-ivory" : "text-coffee hover:bg-blush"}`}>
+                      <EyeOff className="w-4 h-4" /> Secret
+                    </button>
+                  </div>
+                  <p className="text-xs text-taupe mt-2">
+                    {visibility === "public" ? "Other members can read your task titles." : "Only you see your task titles. Others see your progress."}
+                  </p>
                 </div>
               )}
 
