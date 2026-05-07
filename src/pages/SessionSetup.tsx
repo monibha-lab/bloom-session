@@ -28,8 +28,13 @@ const SessionSetup = () => {
   const [uploading, setUploading] = useState(false);
 
   // Step 2
-  const [mode, setMode] = useState<"solo" | "invite" | "join">("solo");
-  const [joinCode, setJoinCode] = useState("");
+  const [mode, setMode] = useState<"solo" | "invite">("solo");
+
+  // Step 3 visibility (group only)
+  const [visibility, setVisibility] = useState<"public" | "secret">("public");
+
+  // Lobby readiness
+  const [memberTaskCounts, setMemberTaskCounts] = useState<Record<string, number>>({});
 
   // Step 3
   const [tasks, setTasks] = useState<string[]>([""]);
