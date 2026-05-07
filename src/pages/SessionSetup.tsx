@@ -118,28 +118,6 @@ const SessionSetup = () => {
   const proceedFromStep2 = async () => {
     if (!user) return toast.error("Please sign in first");
     if (!(await ensureProfile())) return;
-    if (mode === "join") {
-      const code = joinCode.trim().toUpperCase();
-      if (code.length !== 6) return toast.error("Codes are 6 characters");
-      const { data: session, error } = await supabase
-        .from("sessions").select("*").eq("code", code).maybeSingle();
-      if (error) return showSbError("Lookup failed", error);
-      if (!session) return toast.error("Session not found");
-      if (session.status !== "lobby") return toast.error("That session has already started");
-      if (session.code_expires_at && new Date(session.code_expires_at) < new Date()) return toast.error("That code has expired");
-
-      const { count } = await supabase.from("session_members").select("*", { count: "exact", head: true }).eq("session_id", session.id);
-      if ((count ?? 0) >= 6) return toast.error("Session is full");
-
-      const { error: jErr } = await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
-      if (jErr) return showSbError("Join failed", jErr);
-      setSessionId(session.id);
-      setTemplateUrl(session.template_url ?? templateUrl);
-      setTemplateName(session.template_name ?? templateName);
-      setStep(3);
-      return;
-    }
-
     const code = mode === "invite" ? generateCode() : null;
     const expiresAt = mode === "invite" ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null;
     const { data: session, error } = await supabase.from("sessions").insert({
