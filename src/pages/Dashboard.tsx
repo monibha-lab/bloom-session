@@ -18,6 +18,10 @@ const Dashboard = () => {
   const nav = useNavigate();
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -32,6 +36,40 @@ const Dashboard = () => {
       setLoading(false);
     })();
   }, [user]);
+
+  // Find rejoinable active session
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data: ms } = await supabase
+        .from("session_members").select("session_id")
+        .eq("user_id", user.id);
+      const ids = (ms ?? []).map(m => m.session_id);
+      if (!ids.length) return;
+      const { data: ss } = await supabase
+        .from("sessions").select("id, status")
+        .in("id", ids).in("status", ["active", "lobby"])
+        .order("created_at", { ascending: false }).limit(1);
+      if (ss && ss[0]) setActiveSessionId(ss[0].id);
+    })();
+  }, [user]);
+
+  const handleJoin = async () => {
+    setJoinError(null);
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return setJoinError("Enter a code first.");
+    if (!/^[A-Z0-9]{6}$/.test(code)) return setJoinError("Codes are 6 letters or numbers.");
+    setJoining(true);
+    const { data: s, error } = await supabase
+      .from("sessions").select("id, status, code_expires_at")
+      .eq("code", code).maybeSingle();
+    setJoining(false);
+    if (error) { setJoinError(error.message); console.error(error); return; }
+    if (!s) return setJoinError("No session found for that code.");
+    if (s.status === "completed" || s.status === "failed") return setJoinError("That session has already ended.");
+    if (s.code_expires_at && new Date(s.code_expires_at) < new Date()) return setJoinError("That code has expired.");
+    nav(`/session/${s.id}/join`);
+  };
 
   // 7-day chart
   const last7 = Array.from({ length: 7 }).map((_, i) => {
