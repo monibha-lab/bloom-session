@@ -146,7 +146,8 @@ const SessionSetup = () => {
     const cleaned = tasks.map(t => t.trim()).filter(Boolean);
     if (cleaned.length < 1) return toast.error("Add at least one task");
     if (cleaned.length > 10) return toast.error("Max 10 tasks");
-    const rows = cleaned.map((title, i) => ({ session_id: sessionId, user_id: user.id, title, position: i }));
+    const taskVisibility = mode === "solo" ? "public" : visibility;
+    const rows = cleaned.map((title, i) => ({ session_id: sessionId, user_id: user.id, title, position: i, visibility: taskVisibility }));
     const { error } = await supabase.from("tasks").insert(rows);
     if (error) return showSbError("Saving tasks failed", error);
     setStep(4);
