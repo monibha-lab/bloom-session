@@ -6,8 +6,10 @@ import { Ornaments } from "@/components/Ornaments";
 import { TopNav } from "@/components/TopNav";
 import { UsernameModal } from "@/components/UsernameModal";
 import { Button } from "@/components/ui/button";
-import { Star, Flame, BookOpen, Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Star, Flame, BookOpen, Clock, ArrowRight } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
+import { toast } from "sonner";
 
 type Log = { date: string; duration_seconds: number; succeeded: boolean; session_id: string | null; created_at: string };
 
@@ -16,6 +18,16 @@ const Dashboard = () => {
   const nav = useNavigate();
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get("code");
+    if (c) setJoinCode(c.toUpperCase().slice(0, 6));
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -30,6 +42,40 @@ const Dashboard = () => {
       setLoading(false);
     })();
   }, [user]);
+
+  // Find rejoinable active session
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data: ms } = await supabase
+        .from("session_members").select("session_id")
+        .eq("user_id", user.id);
+      const ids = (ms ?? []).map(m => m.session_id);
+      if (!ids.length) return;
+      const { data: ss } = await supabase
+        .from("sessions").select("id, status")
+        .in("id", ids).in("status", ["active", "lobby"])
+        .order("created_at", { ascending: false }).limit(1);
+      if (ss && ss[0]) setActiveSessionId(ss[0].id);
+    })();
+  }, [user]);
+
+  const handleJoin = async () => {
+    setJoinError(null);
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return setJoinError("Enter a code first.");
+    if (!/^[A-Z0-9]{6}$/.test(code)) return setJoinError("Codes are 6 letters or numbers.");
+    setJoining(true);
+    const { data: s, error } = await supabase
+      .from("sessions").select("id, status, code_expires_at")
+      .eq("code", code).maybeSingle();
+    setJoining(false);
+    if (error) { setJoinError(error.message); console.error(error); return; }
+    if (!s) return setJoinError("No session found for that code.");
+    if (s.status === "completed" || s.status === "failed") return setJoinError("That session has already ended.");
+    if (s.code_expires_at && new Date(s.code_expires_at) < new Date()) return setJoinError("That code has expired.");
+    nav(`/session/${s.id}/join`);
+  };
 
   // 7-day chart
   const last7 = Array.from({ length: 7 }).map((_, i) => {
@@ -48,13 +94,48 @@ const Dashboard = () => {
       <UsernameModal />
 
       <main className="container mx-auto px-4 py-6 md:py-10 space-y-8 md:space-y-10">
-        <section className="flex flex-wrap items-end justify-between gap-4 md:gap-6">
-          <div className="min-w-0">
-            <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-3">Your study desk</p>
-            <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl break-words">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
-            <p className="text-coffee/70 mt-2">A quiet record of your focus.</p>
+        <section className="space-y-6">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-3">Your study desk</p>
+              <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl break-words">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
+              <p className="text-coffee/70 mt-2">A quiet record of your focus.</p>
+            </div>
           </div>
-          <Button size="lg" onClick={() => nav("/session/setup")} className="w-full sm:w-auto">Start new session</Button>
+
+          {activeSessionId && (
+            <div className="editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-taupe">Still open</p>
+                <p className="font-serif text-lg text-coffee">You have an active session waiting.</p>
+              </div>
+              <Button variant="outline" onClick={() => nav(`/session/${activeSessionId}`)}>
+                Rejoin <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
+          )}
+
+          <div className="flex flex-col md:flex-row gap-4 md:items-stretch">
+            <Button size="lg" onClick={() => nav("/session/setup")} className="md:flex-1 w-full">
+              Start new session
+            </Button>
+            <div className="editorial-panel bg-card p-3 md:flex-1 flex flex-col sm:flex-row gap-2 sm:items-center">
+              <div className="flex-1">
+                <Input
+                  value={joinCode}
+                  onChange={(e) => { setJoinError(null); setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+                  placeholder="JOIN CODE"
+                  maxLength={6}
+                  className="bg-ivory tracking-[0.4em] font-serif text-center text-lg uppercase border-0 focus-visible:ring-0"
+                />
+              </div>
+              <Button onClick={handleJoin} disabled={joining} variant="outline" className="w-full sm:w-auto shrink-0">
+                {joining ? "Looking…" : "Join"}
+              </Button>
+            </div>
+          </div>
+          {joinError && <p className="text-sm text-destructive">{joinError}</p>}
         </section>
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">

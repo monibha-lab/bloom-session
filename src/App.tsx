@@ -10,6 +10,7 @@ import AuthPage from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import SessionSetup from "./pages/SessionSetup.tsx";
 import Session from "./pages/Session.tsx";
+import JoinSession from "./pages/JoinSession.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/session/setup" element={<ProtectedRoute><SessionSetup /></ProtectedRoute>} />
             <Route path="/session/:id" element={<ProtectedRoute><Session /></ProtectedRoute>} />
+            <Route path="/session/:id/join" element={<ProtectedRoute><JoinSession /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

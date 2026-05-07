@@ -227,6 +227,7 @@ export type Database = {
           session_id: string
           title: string
           user_id: string
+          visibility: string
         }
         Insert: {
           completed?: boolean
@@ -236,6 +237,7 @@ export type Database = {
           session_id: string
           title: string
           user_id: string
+          visibility?: string
         }
         Update: {
           completed?: boolean
@@ -245,6 +247,7 @@ export type Database = {
           session_id?: string
           title?: string
           user_id?: string
+          visibility?: string
         }
         Relationships: [
           {

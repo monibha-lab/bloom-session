@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TEMPLATES } from "@/lib/templates";
-import { Upload, Plus, X, Users, User, Hash, Check } from "lucide-react";
+import { Upload, Plus, X, Users, User, Check, Eye, EyeOff, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 type Step = 1 | 2 | 3 | 4;
@@ -28,8 +28,13 @@ const SessionSetup = () => {
   const [uploading, setUploading] = useState(false);
 
   // Step 2
-  const [mode, setMode] = useState<"solo" | "invite" | "join">("solo");
-  const [joinCode, setJoinCode] = useState("");
+  const [mode, setMode] = useState<"solo" | "invite">("solo");
+
+  // Step 3 visibility (group only)
+  const [visibility, setVisibility] = useState<"public" | "secret">("public");
+
+  // Lobby readiness
+  const [memberTaskCounts, setMemberTaskCounts] = useState<Record<string, number>>({});
 
   // Step 3
   const [tasks, setTasks] = useState<string[]>([""]);
@@ -47,9 +52,11 @@ const SessionSetup = () => {
   useEffect(() => {
     if (!sessionId) return;
     const ch = supabase.channel(`setup:${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "session_members", filter: `session_id=eq.${sessionId}` }, () => loadMembers())
+      .on("postgres_changes", { event: "*", schema: "public", table: "session_members", filter: `session_id=eq.${sessionId}` }, () => { loadMembers(); loadTaskCounts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks", filter: `session_id=eq.${sessionId}` }, () => loadTaskCounts())
       .subscribe();
     loadMembers();
+    loadTaskCounts();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -62,6 +69,14 @@ const SessionSetup = () => {
     const { data: profs } = await supabase.from("profiles").select("id, username, avatar_url").in("id", ids);
     const map = new Map((profs ?? []).map((p: any) => [p.id, p]));
     setMembers(ms.map(m => ({ user_id: m.user_id, profile: map.get(m.user_id) as any })));
+  };
+
+  const loadTaskCounts = async () => {
+    if (!sessionId) return;
+    const { data } = await supabase.from("tasks").select("user_id").eq("session_id", sessionId);
+    const counts: Record<string, number> = {};
+    (data ?? []).forEach((t: any) => { counts[t.user_id] = (counts[t.user_id] ?? 0) + 1; });
+    setMemberTaskCounts(counts);
   };
 
   const onUpload = async (file: File) => {
@@ -113,28 +128,6 @@ const SessionSetup = () => {
   const proceedFromStep2 = async () => {
     if (!user) return toast.error("Please sign in first");
     if (!(await ensureProfile())) return;
-    if (mode === "join") {
-      const code = joinCode.trim().toUpperCase();
-      if (code.length !== 6) return toast.error("Codes are 6 characters");
-      const { data: session, error } = await supabase
-        .from("sessions").select("*").eq("code", code).maybeSingle();
-      if (error) return showSbError("Lookup failed", error);
-      if (!session) return toast.error("Session not found");
-      if (session.status !== "lobby") return toast.error("That session has already started");
-      if (session.code_expires_at && new Date(session.code_expires_at) < new Date()) return toast.error("That code has expired");
-
-      const { count } = await supabase.from("session_members").select("*", { count: "exact", head: true }).eq("session_id", session.id);
-      if ((count ?? 0) >= 6) return toast.error("Session is full");
-
-      const { error: jErr } = await supabase.from("session_members").insert({ session_id: session.id, user_id: user.id });
-      if (jErr) return showSbError("Join failed", jErr);
-      setSessionId(session.id);
-      setTemplateUrl(session.template_url ?? templateUrl);
-      setTemplateName(session.template_name ?? templateName);
-      setStep(3);
-      return;
-    }
-
     const code = mode === "invite" ? generateCode() : null;
     const expiresAt = mode === "invite" ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null;
     const { data: session, error } = await supabase.from("sessions").insert({
@@ -163,7 +156,8 @@ const SessionSetup = () => {
     const cleaned = tasks.map(t => t.trim()).filter(Boolean);
     if (cleaned.length < 1) return toast.error("Add at least one task");
     if (cleaned.length > 10) return toast.error("Max 10 tasks");
-    const rows = cleaned.map((title, i) => ({ session_id: sessionId, user_id: user.id, title, position: i }));
+    const taskVisibility = mode === "solo" ? "public" : visibility;
+    const rows = cleaned.map((title, i) => ({ session_id: sessionId, user_id: user.id, title, position: i, visibility: taskVisibility }));
     const { error } = await supabase.from("tasks").insert(rows);
     if (error) return showSbError("Saving tasks failed", error);
     setStep(4);
@@ -251,17 +245,11 @@ const SessionSetup = () => {
           {step === 2 && (
             <motion.section key="s2" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
               <h1 className="font-serif text-3xl md:text-4xl mb-6">Who's studying?</h1>
-              <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <ModeCard active={mode === "solo"} onClick={() => setMode("solo")} icon={<User className="w-5 h-5" />} title="Solo Study" body="A quiet room of your own." />
                 <ModeCard active={mode === "invite"} onClick={() => setMode("invite")} icon={<Users className="w-5 h-5" />} title="Invite Friends" body="Up to six readers with a private code." />
-                <ModeCard active={mode === "join"} onClick={() => setMode("join")} icon={<Hash className="w-5 h-5" />} title="Join by Code" body="Enter a 6-character invitation." />
               </div>
-              {mode === "join" && (
-                <div className="mt-6 max-w-sm">
-                  <Label>6-character code</Label>
-                  <Input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} maxLength={6} className="bg-ivory text-2xl tracking-[0.5em] font-serif" />
-                </div>
-              )}
+              <p className="text-xs text-taupe mt-4">Joining someone else's session? Use the join code on your dashboard.</p>
               <div className="mt-8 flex justify-between">
                 <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
                 <Button onClick={proceedFromStep2}>Continue</Button>
@@ -279,8 +267,19 @@ const SessionSetup = () => {
                   <div>
                     <p className="text-xs uppercase tracking-widest text-taupe">Invitation code</p>
                     <p className="font-serif text-2xl md:text-3xl tracking-[0.3em] text-coffee break-all">{createdCode}</p>
+                    <p className="text-xs text-taupe mt-1">Expires in 30 minutes</p>
                   </div>
-                  <p className="text-sm text-taupe">Expires in 30 minutes</p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => {
+                      navigator.clipboard.writeText(createdCode);
+                      toast.success("Code copied");
+                    }}><Copy className="w-4 h-4" /> Copy code</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const link = `${window.location.origin}/dashboard?code=${createdCode}`;
+                      navigator.clipboard.writeText(link);
+                      toast.success("Invite link copied");
+                    }}><Copy className="w-4 h-4" /> Copy link</Button>
+                  </div>
                 </div>
               )}
 
@@ -290,6 +289,25 @@ const SessionSetup = () => {
                   {members.map(m => (
                     <span key={m.user_id} className="px-2 py-1 bg-sand rounded-sm text-coffee">@{m.profile?.username ?? "guest"}</span>
                   ))}
+                </div>
+              )}
+
+              {mode === "invite" && (
+                <div className="mb-6">
+                  <Label className="text-xs uppercase tracking-widest text-taupe">Your task visibility</Label>
+                  <div className="mt-2 inline-flex border border-border bg-card overflow-hidden">
+                    <button type="button" onClick={() => setVisibility("public")}
+                      className={`px-4 py-2 text-sm flex items-center gap-2 transition-all ${visibility === "public" ? "bg-coffee text-ivory" : "text-coffee hover:bg-blush"}`}>
+                      <Eye className="w-4 h-4" /> Public
+                    </button>
+                    <button type="button" onClick={() => setVisibility("secret")}
+                      className={`px-4 py-2 text-sm flex items-center gap-2 transition-all border-l border-border ${visibility === "secret" ? "bg-coffee text-ivory" : "text-coffee hover:bg-blush"}`}>
+                      <EyeOff className="w-4 h-4" /> Secret
+                    </button>
+                  </div>
+                  <p className="text-xs text-taupe mt-2">
+                    {visibility === "public" ? "Other members can read your task titles." : "Only you see your task titles. Others see your progress."}
+                  </p>
                 </div>
               )}
 
@@ -357,9 +375,37 @@ const SessionSetup = () => {
                 </div>
               )}
 
+              {mode === "invite" && (
+                <div className="mt-8 editorial-panel bg-card p-4">
+                  <p className="text-xs uppercase tracking-widest text-taupe mb-3">Session readiness</p>
+                  <ul className="space-y-2 text-sm">
+                    {members.map(m => {
+                      const count = memberTaskCounts[m.user_id] ?? 0;
+                      const ready = count > 0;
+                      return (
+                        <li key={m.user_id} className="flex items-center justify-between">
+                          <span>@{m.profile?.username ?? "guest"}{m.user_id === user?.id && " (you)"}</span>
+                          <span className={ready ? "text-olive" : "text-taupe italic"}>
+                            {ready ? `Ready · ${count} task${count > 1 ? "s" : ""}` : "Awaiting tasks…"}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {createdCode && <p className="text-xs text-taupe mt-3">Share code <span className="font-serif tracking-widest text-coffee">{createdCode}</span> with friends.</p>}
+                </div>
+              )}
+
               <div className="mt-8 flex justify-between">
                 <Button variant="outline" onClick={() => setStep(3)}>Back</Button>
-                <Button onClick={startSession}>Begin session</Button>
+                {(() => {
+                  const allReady = mode === "solo" || (members.length > 0 && members.every(m => (memberTaskCounts[m.user_id] ?? 0) > 0));
+                  return (
+                    <Button onClick={startSession} disabled={!allReady} title={!allReady ? "Waiting for everyone to submit tasks" : undefined}>
+                      {allReady ? "Begin session" : "Waiting for members…"}
+                    </Button>
+                  );
+                })()}
               </div>
             </motion.section>
           )}
