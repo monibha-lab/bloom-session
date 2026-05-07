@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TEMPLATES } from "@/lib/templates";
-import { Upload, Plus, X, Users, User, Hash, Check } from "lucide-react";
+import { Upload, Plus, X, Users, User, Check, Eye, EyeOff, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 type Step = 1 | 2 | 3 | 4;
