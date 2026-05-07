@@ -52,9 +52,11 @@ const SessionSetup = () => {
   useEffect(() => {
     if (!sessionId) return;
     const ch = supabase.channel(`setup:${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "session_members", filter: `session_id=eq.${sessionId}` }, () => loadMembers())
+      .on("postgres_changes", { event: "*", schema: "public", table: "session_members", filter: `session_id=eq.${sessionId}` }, () => { loadMembers(); loadTaskCounts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks", filter: `session_id=eq.${sessionId}` }, () => loadTaskCounts())
       .subscribe();
     loadMembers();
+    loadTaskCounts();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -67,6 +69,14 @@ const SessionSetup = () => {
     const { data: profs } = await supabase.from("profiles").select("id, username, avatar_url").in("id", ids);
     const map = new Map((profs ?? []).map((p: any) => [p.id, p]));
     setMembers(ms.map(m => ({ user_id: m.user_id, profile: map.get(m.user_id) as any })));
+  };
+
+  const loadTaskCounts = async () => {
+    if (!sessionId) return;
+    const { data } = await supabase.from("tasks").select("user_id").eq("session_id", sessionId);
+    const counts: Record<string, number> = {};
+    (data ?? []).forEach((t: any) => { counts[t.user_id] = (counts[t.user_id] ?? 0) + 1; });
+    setMemberTaskCounts(counts);
   };
 
   const onUpload = async (file: File) => {
