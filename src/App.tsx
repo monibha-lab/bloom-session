@@ -28,6 +28,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/session/setup" element={<ProtectedRoute><SessionSetup /></ProtectedRoute>} />
             <Route path="/session/:id" element={<ProtectedRoute><Session /></ProtectedRoute>} />
+            <Route path="/session/:id/join" element={<ProtectedRoute><JoinSession /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
