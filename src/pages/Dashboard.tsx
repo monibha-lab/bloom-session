@@ -88,13 +88,48 @@ const Dashboard = () => {
       <UsernameModal />
 
       <main className="container mx-auto px-4 py-6 md:py-10 space-y-8 md:space-y-10">
-        <section className="flex flex-wrap items-end justify-between gap-4 md:gap-6">
-          <div className="min-w-0">
-            <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-3">Your study desk</p>
-            <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl break-words">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
-            <p className="text-coffee/70 mt-2">A quiet record of your focus.</p>
+        <section className="space-y-6">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <p className="uppercase tracking-[0.3em] text-xs text-taupe mb-3">Your study desk</p>
+              <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl break-words">{profile?.username ? `Hello, ${profile.username}.` : "Hello."}</h1>
+              <p className="text-coffee/70 mt-2">A quiet record of your focus.</p>
+            </div>
           </div>
-          <Button size="lg" onClick={() => nav("/session/setup")} className="w-full sm:w-auto">Start new session</Button>
+
+          {activeSessionId && (
+            <div className="editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-taupe">Still open</p>
+                <p className="font-serif text-lg text-coffee">You have an active session waiting.</p>
+              </div>
+              <Button variant="outline" onClick={() => nav(`/session/${activeSessionId}`)}>
+                Rejoin <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
+          )}
+
+          <div className="flex flex-col md:flex-row gap-4 md:items-stretch">
+            <Button size="lg" onClick={() => nav("/session/setup")} className="md:flex-1 w-full">
+              Start new session
+            </Button>
+            <div className="editorial-panel bg-card p-3 md:flex-1 flex flex-col sm:flex-row gap-2 sm:items-center">
+              <div className="flex-1">
+                <Input
+                  value={joinCode}
+                  onChange={(e) => { setJoinError(null); setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+                  placeholder="JOIN CODE"
+                  maxLength={6}
+                  className="bg-ivory tracking-[0.4em] font-serif text-center text-lg uppercase border-0 focus-visible:ring-0"
+                />
+              </div>
+              <Button onClick={handleJoin} disabled={joining} variant="outline" className="w-full sm:w-auto shrink-0">
+                {joining ? "Looking…" : "Join"}
+              </Button>
+            </div>
+          </div>
+          {joinError && <p className="text-sm text-destructive">{joinError}</p>}
         </section>
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
