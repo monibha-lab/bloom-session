@@ -10,6 +10,7 @@ import AuthPage from "./pages/Auth.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import SessionSetup from "./pages/SessionSetup.tsx";
 import Session from "./pages/Session.tsx";
+import JoinSession from "./pages/JoinSession.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
