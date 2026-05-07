@@ -6,8 +6,10 @@ import { Ornaments } from "@/components/Ornaments";
 import { TopNav } from "@/components/TopNav";
 import { UsernameModal } from "@/components/UsernameModal";
 import { Button } from "@/components/ui/button";
-import { Star, Flame, BookOpen, Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Star, Flame, BookOpen, Clock, ArrowRight } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
+import { toast } from "sonner";
 
 type Log = { date: string; duration_seconds: number; succeeded: boolean; session_id: string | null; created_at: string };
 
