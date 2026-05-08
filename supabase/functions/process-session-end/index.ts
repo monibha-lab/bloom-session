@@ -44,9 +44,9 @@ Deno.serve(async (req) => {
       .from('sessions').select('*').eq('id', session_id).single();
     if (sErr || !session) return json({ error: 'Session not found' }, 404);
 
-    // Only host can finalize
-    if (session.host_id !== callerId) {
-      return json({ error: 'Only host can finalize' }, 403);
+    // Host can finalize either way; members can only finalize as failure (when leaving early)
+    if (session.host_id !== callerId && succeeded) {
+      return json({ error: 'Only host can mark success' }, 403);
     }
 
     if (session.status === 'completed' || session.status === 'failed') {
