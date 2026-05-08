@@ -510,16 +510,42 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
   const [denied, setDenied] = useState(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+  const iceTimersRef = useRef<Map<string, number>>(new Map());
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteMuted, setRemoteMuted] = useState<Record<string, { cam: boolean; mic: boolean }>>({});
+  const [iceFailed, setIceFailed] = useState<Record<string, boolean>>({});
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const [, force] = useState(0);
+
+  const broadcastState = useCallback((cam: boolean, mic: boolean) => {
+    channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
+  }, [userId]);
+
+  const attachLocalTracksToPeer = (pc: RTCPeerConnection) => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const senders = pc.getSenders();
+    stream.getTracks().forEach(track => {
+      const sender = senders.find(s => s.track?.kind === track.kind);
+      if (sender) {
+        sender.replaceTrack(track).catch(e => console.error("replaceTrack failed", e?.name));
+      } else {
+        pc.addTrack(track, stream);
+      }
+    });
+  };
+
+  const removeLocalTracksFromPeer = (pc: RTCPeerConnection) => {
+    pc.getSenders().forEach(s => { if (s.track) { try { pc.removeTrack(s); } catch {} } });
+  };
 
   const ensureLocalStream = useCallback(async (wantCam: boolean, wantMic: boolean) => {
     if (!wantCam && !wantMic) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
-      // Remove tracks from all peers
-      peersRef.current.forEach(pc => pc.getSenders().forEach(s => s.track && pc.removeTrack(s)));
+      peersRef.current.forEach(pc => removeLocalTracksFromPeer(pc));
+      force(n => n + 1);
       return null;
     }
     try {
@@ -527,13 +553,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = s;
       setDenied(false);
-      // Attach to existing peers
-      peersRef.current.forEach(pc => {
-        s.getTracks().forEach(t => pc.addTrack(t, s));
-      });
+      peersRef.current.forEach(pc => attachLocalTracksToPeer(pc));
+      force(n => n + 1);
       return s;
     } catch (err: any) {
-      console.error("getUserMedia failed", err);
+      console.error("getUserMedia failed", err?.name);
       if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
         setDenied(true);
         toast.error("Camera/mic permission denied. Enable it in your browser settings.");
@@ -545,7 +569,6 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     }
   }, []);
 
-  // Toggle handlers
   const toggleCam = async () => {
     const next = !camOn;
     setCamOn(next);
@@ -559,18 +582,27 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     broadcastState(camOn, next);
   };
 
-  const broadcastState = (cam: boolean, mic: boolean) => {
-    channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
+  const startIceTimer = (peerId: string) => {
+    const existing = iceTimersRef.current.get(peerId);
+    if (existing) window.clearTimeout(existing);
+    const t = window.setTimeout(() => {
+      const pc = peersRef.current.get(peerId);
+      if (!pc) return;
+      if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
+        setIceFailed(prev => ({ ...prev, [peerId]: true }));
+        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+      }
+    }, ICE_TIMEOUT_MS);
+    iceTimersRef.current.set(peerId, t as unknown as number);
   };
 
-  const createPeer = useCallback((peerId: string, initiator: boolean) => {
+  const createPeer = useCallback((peerId: string, polite: boolean) => {
     if (peersRef.current.has(peerId)) return peersRef.current.get(peerId)!;
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peersRef.current.set(peerId, pc);
+    makingOfferRef.current.set(peerId, false);
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current!));
-    }
+    if (localStreamRef.current) attachLocalTracksToPeer(pc);
 
     pc.ontrack = (e) => {
       setRemoteStreams(prev => ({ ...prev, [peerId]: e.streams[0] }));
@@ -580,21 +612,31 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         channelRef.current?.send({ type: "broadcast", event: "ice", payload: { from: userId, to: peerId, candidate: e.candidate } });
       }
     };
-    pc.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-        // Will be cleaned on member leave
+    pc.onnegotiationneeded = async () => {
+      try {
+        makingOfferRef.current.set(peerId, true);
+        await pc.setLocalDescription();
+        channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: pc.localDescription } });
+      } catch (e) {
+        console.error("negotiation failed");
+      } finally {
+        makingOfferRef.current.set(peerId, false);
       }
     };
-
-    if (initiator) {
-      (async () => {
-        try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: offer } });
-        } catch (e) { console.error("offer failed", e); }
-      })();
-    }
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState;
+      if (st === "checking" || st === "new") {
+        startIceTimer(peerId);
+      } else if (st === "connected" || st === "completed") {
+        const t = iceTimersRef.current.get(peerId);
+        if (t) window.clearTimeout(t);
+        setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+      } else if (st === "failed") {
+        setIceFailed(prev => ({ ...prev, [peerId]: true }));
+        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+        try { pc.restartIce(); } catch {}
+      }
+    };
     return pc;
   }, [userId]);
 
@@ -602,11 +644,14 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     const pc = peersRef.current.get(peerId);
     pc?.close();
     peersRef.current.delete(peerId);
+    const t = iceTimersRef.current.get(peerId);
+    if (t) window.clearTimeout(t);
+    iceTimersRef.current.delete(peerId);
     setRemoteStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
     setRemoteMuted(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
   };
 
-  // Signaling channel
   useEffect(() => {
     if (!userId || !sessionId) return;
     const ch = supabase.channel(`rtc:${sessionId}`, { config: { broadcast: { self: false }, presence: { key: userId } } });
@@ -614,27 +659,38 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
 
     ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
       if (payload.to !== userId) return;
-      const pc = createPeer(payload.from, false);
+      const polite = userId > payload.from;
+      const pc = peersRef.current.get(payload.from) ?? createPeer(payload.from, polite);
+      const making = makingOfferRef.current.get(payload.from) || false;
+      const offerCollision = making || pc.signalingState !== "stable";
+      if (offerCollision && !polite) return;
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        if (offerCollision) {
+          await Promise.all([
+            (pc as any).setLocalDescription({ type: "rollback" }).catch(() => {}),
+            pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)),
+          ]);
+        } else {
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: answer } });
-      } catch (e) { console.error("answer failed", e); }
+        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: pc.localDescription } });
+      } catch (e) { console.error("answer failed"); }
     });
     ch.on("broadcast", { event: "answer" }, async ({ payload }) => {
       if (payload.to !== userId) return;
       const pc = peersRef.current.get(payload.from);
       if (!pc) return;
       try { await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)); }
-      catch (e) { console.error("setRemoteDescription answer", e); }
+      catch (e) { console.error("setRemoteDescription answer"); }
     });
     ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
       if (payload.to !== userId) return;
       const pc = peersRef.current.get(payload.from);
       if (!pc) return;
       try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); }
-      catch (e) { console.error("addIceCandidate", e); }
+      catch (e) { console.error("addIceCandidate"); }
     });
     ch.on("broadcast", { event: "media-state" }, ({ payload }) => {
       if (!payload?.from || payload.from === userId) return;
@@ -642,9 +698,14 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     });
     ch.on("presence", { event: "join" }, ({ key }) => {
       if (key === userId) return;
-      // Lower id initiates to avoid double-offer
       if (userId < key && peersRef.current.size < MAX_PEERS) {
-        createPeer(key, true);
+        const pc = createPeer(key, false);
+        try {
+          if (pc.getTransceivers().length === 0) {
+            pc.addTransceiver("video", { direction: "recvonly" });
+            pc.addTransceiver("audio", { direction: "recvonly" });
+          }
+        } catch {}
       }
     });
     ch.on("presence", { event: "leave" }, ({ key }) => {
@@ -654,12 +715,16 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     ch.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         await ch.track({ user_id: userId });
+        // Re-broadcast our current media state so late joiners learn it
+        broadcastState(camOn, micOn);
       }
     });
 
     return () => {
       peersRef.current.forEach(pc => pc.close());
       peersRef.current.clear();
+      iceTimersRef.current.forEach(t => window.clearTimeout(t));
+      iceTimersRef.current.clear();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
       supabase.removeChannel(ch);
