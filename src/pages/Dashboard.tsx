@@ -87,17 +87,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {activeSessionId && (
-            <div className="editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-taupe">Still open</p>
-                <p className="font-serif text-lg text-coffee">You have an active session waiting.</p>
-              </div>
-              <Button variant="outline" onClick={() => nav(`/session/${activeSessionId}`)}>
-                Rejoin <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
-          )}
 
           <div className="flex flex-col md:flex-row gap-4 md:items-stretch">
             <Button size="lg" onClick={() => nav("/session/setup")} className="md:flex-1 w-full">
