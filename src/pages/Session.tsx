@@ -753,32 +753,48 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         {members.slice(0, MAX_PEERS).map(m => {
           const isMe = m.user_id === userId;
           const stream = isMe ? localStreamRef.current : remoteStreams[m.user_id];
-          const camActive = isMe ? camOn : (remoteMuted[m.user_id]?.cam ?? false);
-          const micActive = isMe ? micOn : (remoteMuted[m.user_id]?.mic ?? false);
+          const mediaState = remoteMuted[m.user_id];
+          const camActive = isMe ? camOn : (mediaState?.cam ?? false);
+          const micActive = isMe ? micOn : (mediaState?.mic ?? false);
+          const status = isMe
+            ? (camOn || micOn ? null : "Camera off")
+            : iceFailed[m.user_id]
+              ? "Connection failed"
+              : mediaState === undefined
+                ? "Waiting for media"
+                : (!camActive && !micActive ? "Camera off" : null);
           return (
-            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} />
+            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} status={status} />
           );
         })}
       </div>
-      <p className="mt-3 text-[10px] text-taupe italic">P2P video over free STUN. Strict networks may need TURN.</p>
+      <p className="mt-3 text-[10px] text-taupe italic">
+        P2P video over {HAS_TURN ? "STUN + TURN" : "STUN only"}.{HAS_TURN ? "" : " Strict networks may need TURN."}
+      </p>
     </div>
   );
 }
 
-function RemoteTile({ member, stream, camOn, micOn, isMe }: {
-  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean;
+function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
+  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream ?? null;
   }, [stream]);
+  const initials = (member.profile?.username ?? "?").trim().slice(0, 2).toUpperCase();
   return (
     <div className="aspect-video bg-cocoa relative overflow-hidden border border-border/60">
       {camOn && stream ? (
         <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
       ) : (
         <div className="w-full h-full grid place-items-center bg-sand">
-          <span className="font-serif text-2xl text-coffee">{(member.profile?.username ?? "?")[0]?.toUpperCase()}</span>
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-coffee text-ivory font-serif text-xl grid place-items-center">
+              {initials || "?"}
+            </div>
+            {status && <div className="mt-1 text-[10px] uppercase tracking-widest text-coffee/70">{status}</div>}
+          </div>
         </div>
       )}
       <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
