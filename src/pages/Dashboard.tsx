@@ -42,22 +42,7 @@ const Dashboard = () => {
     })();
   }, [user]);
 
-  // Find rejoinable active session
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      const { data: ms } = await supabase
-        .from("session_members").select("session_id")
-        .eq("user_id", user.id);
-      const ids = (ms ?? []).map(m => m.session_id);
-      if (!ids.length) return;
-      const { data: ss } = await supabase
-        .from("sessions").select("id, status")
-        .in("id", ids).in("status", ["active", "lobby"])
-        .order("created_at", { ascending: false }).limit(1);
-      if (ss && ss[0]) setActiveSessionId(ss[0].id);
-    })();
-  }, [user]);
+  // No rejoin: leaving an active session ends it as a failure.
 
   const handleJoin = async () => {
     setJoinError(null);
