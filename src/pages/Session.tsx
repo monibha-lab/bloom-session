@@ -256,7 +256,7 @@ const Session = () => {
             </div>
           )}
 
-          <PeopleGrid members={members} />
+          <PeopleGrid members={members} sessionId={sessionId} userId={user?.id} />
         </aside>
       </main>
 
