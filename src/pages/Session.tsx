@@ -94,6 +94,7 @@ const Session = () => {
     }
   }, [sessionId, totalElapsedSec, nav]);
 
+  // Auto-finalize when timer hits 0 (host only)
   useEffect(() => {
     if (!session || !user) return;
     if (session.status !== "active") return;
@@ -103,11 +104,22 @@ const Session = () => {
     }
   }, [session, user, startedAt, remainingSec, finalize]);
 
+  // Auto-end on full success (host only)
+  useEffect(() => {
+    if (!session || !user) return;
+    if (session.status !== "active") return;
+    if (session.host_id !== user.id) return;
+    if (tasks.length > 0 && tasks.every(t => t.completed) && !finalizeStarted.current) {
+      finalize(true);
+    }
+  }, [session, user, tasks, finalize]);
+
   useEffect(() => {
     if (!session) return;
     if (session.status === "completed" || session.status === "failed") {
       if (!ended) setEnded({ ok: session.status === "completed" });
-      setTimeout(() => nav("/dashboard"), 4000);
+      const t = setTimeout(() => nav("/dashboard"), 4000);
+      return () => clearTimeout(t);
     }
   }, [session, ended, nav]);
 
@@ -119,14 +131,24 @@ const Session = () => {
     if (error) showSbError("Could not update task", error);
   };
 
+  // Leaving an active session = whole session fails for everyone
   const exitFail = async () => {
-    if (session?.host_id === user?.id) {
-      await finalize(false);
+    if (!session) return nav("/dashboard");
+    if (session.status === "active" || session.status === "lobby") {
+      const allDone = tasks.length > 0 && tasks.every(t => t.completed);
+      await finalize(allDone);
     } else {
-      await supabase.from("session_members").delete().eq("session_id", sessionId).eq("user_id", user!.id);
       nav("/dashboard");
     }
   };
+
+  // Best-effort: warn before tab close during active session
+  useEffect(() => {
+    if (session?.status !== "active") return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [session?.status]);
 
   const fmt = (s: number) => {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
