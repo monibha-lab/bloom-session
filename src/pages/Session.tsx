@@ -328,87 +328,71 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   tasks: Task[]; members: Member[]; userId?: string; templateUrl: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 560 });
+  const [box, setBox] = useState({ w: 800, h: 560 });
+  const [imgRatio, setImgRatio] = useState<number | null>(null);
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const obs = new ResizeObserver(() => {
-      if (ref.current) setSize({ w: ref.current.clientWidth, h: Math.max(280, Math.min(600, ref.current.clientWidth * 0.7)) });
+      if (ref.current) setBox({ w: ref.current.clientWidth, h: Math.max(280, Math.min(620, ref.current.clientWidth * 0.66)) });
     });
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
   }, []);
 
-  // Build a stable grid of pieces sized to the number of tasks.
+  // Load template natural aspect
+  useEffect(() => {
+    if (!templateUrl) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => setImgRatio(img.naturalWidth / img.naturalHeight);
+    img.src = templateUrl;
+  }, [templateUrl]);
+
+  // Fitted rect (object-fit: contain) inside the box
+  const fit = useMemo(() => {
+    const r = imgRatio ?? (box.w / box.h);
+    const boxR = box.w / box.h;
+    let w = box.w, h = box.h, x = 0, y = 0;
+    if (r > boxR) { h = box.w / r; y = (box.h - h) / 2; }
+    else { w = box.h * r; x = (box.w - w) / 2; }
+    return { x, y, w, h };
+  }, [box, imgRatio]);
+
+  // Grid sized to number of tasks, fitted exactly to image rect (no gaps)
   const total = Math.max(1, tasks.length);
   const { cols, rows } = useMemo(() => {
-    const ratio = size.w / Math.max(1, size.h);
     let bestCols = 1, bestDiff = Infinity;
     for (let c = 1; c <= total; c++) {
       const r = Math.ceil(total / c);
-      const tileRatio = (size.w / c) / (size.h / r);
+      const tileRatio = (fit.w / c) / (fit.h / r);
       const diff = Math.abs(tileRatio - 1);
-      if (diff < bestDiff && r * c >= total) { bestDiff = diff; bestCols = c; }
+      if (diff < bestDiff) { bestDiff = diff; bestCols = c; }
     }
     return { cols: bestCols, rows: Math.ceil(total / bestCols) };
-  }, [total, size]);
+  }, [total, fit]);
 
-  const tileW = size.w / cols;
-  const tileH = size.h / rows;
+  const tileW = fit.w / cols;
+  const tileH = fit.h / rows;
 
-  // Deterministic knob direction per shared edge: + outward from left/top cell, - inward from right/bottom
-  const seedRand = (a: number, b: number) => {
-    const s = Math.sin(a * 374761393 + b * 668265263) * 43758.5453;
-    return s - Math.floor(s);
-  };
-
-  // Returns SVG path for a single jigsaw piece at grid (c,r)
-  const piecePath = (c: number, r: number) => {
-    const x = c * tileW, y = r * tileH;
-    const knob = Math.min(tileW, tileH) * 0.18;
-    // knob +1 means knob bulges outward from this piece on that edge, -1 means socket cuts inward, 0 means flat (boundary)
-    const top = r === 0 ? 0 : (seedRand(c, r) > 0.5 ? 1 : -1) * (-1); // top of (c,r) is bottom of (c,r-1) flipped
-    const right = c === cols - 1 ? 0 : (seedRand(c + 1, r) > 0.5 ? 1 : -1);
-    const bottom = r === rows - 1 ? 0 : (seedRand(c, r + 1) > 0.5 ? 1 : -1) * -1;
-    const left = c === 0 ? 0 : (seedRand(c, r) > 0.5 ? 1 : -1) * -1;
-
-    // Build path
-    const midX = x + tileW / 2;
-    const midY = y + tileH / 2;
-    let d = `M ${x} ${y} `;
-
-    // Top edge
-    if (top === 0) d += `L ${x + tileW} ${y} `;
-    else {
-      d += `L ${midX - knob} ${y} `;
-      d += `C ${midX - knob} ${y - knob * top}, ${midX + knob} ${y - knob * top}, ${midX + knob} ${y} `;
-      d += `L ${x + tileW} ${y} `;
+  // Place "extra" pieces (when total < cols*rows) by widening last-row pieces so they still cover
+  // Map index -> rectangle covering its share of fit area.
+  const rects = useMemo(() => {
+    const out: { x: number; y: number; w: number; h: number; c: number; r: number }[] = [];
+    const lastRowCount = total - (rows - 1) * cols; // pieces in final row
+    for (let i = 0; i < total; i++) {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const isLastRow = r === rows - 1;
+      const countThisRow = isLastRow ? lastRowCount : cols;
+      const w = fit.w / countThisRow;
+      const x = fit.x + c * w;
+      const y = fit.y + r * tileH;
+      out.push({ x, y, w, h: tileH, c, r });
     }
-    // Right edge
-    if (right === 0) d += `L ${x + tileW} ${y + tileH} `;
-    else {
-      d += `L ${x + tileW} ${midY - knob} `;
-      d += `C ${x + tileW + knob * right} ${midY - knob}, ${x + tileW + knob * right} ${midY + knob}, ${x + tileW} ${midY + knob} `;
-      d += `L ${x + tileW} ${y + tileH} `;
-    }
-    // Bottom edge
-    if (bottom === 0) d += `L ${x} ${y + tileH} `;
-    else {
-      d += `L ${midX + knob} ${y + tileH} `;
-      d += `C ${midX + knob} ${y + tileH + knob * bottom}, ${midX - knob} ${y + tileH + knob * bottom}, ${midX - knob} ${y + tileH} `;
-      d += `L ${x} ${y + tileH} `;
-    }
-    // Left edge
-    if (left === 0) d += `L ${x} ${y} `;
-    else {
-      d += `L ${x} ${midY + knob} `;
-      d += `C ${x - knob * left} ${midY + knob}, ${x - knob * left} ${midY - knob}, ${x} ${midY - knob} `;
-      d += `L ${x} ${y} `;
-    }
-    return d + "Z";
-  };
+    return out;
+  }, [total, cols, rows, tileH, fit]);
 
-  // Stable assignment of tasks -> piece indices (sorted by user_id then position so it's consistent across users).
   const sortedTasks = useMemo(() => {
     return [...tasks].sort((a, b) => {
       if (a.user_id < b.user_id) return -1;
@@ -426,48 +410,54 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   return (
     <div ref={ref} className="editorial-panel bg-card p-3 relative">
       <p className="text-xs uppercase tracking-widest text-taupe mb-2">Study canvas · {sortedTasks.length} pieces</p>
-      <div className="relative" style={{ width: "100%", height: size.h }}>
-        <svg width={size.w} height={size.h} className="block">
+      <div className="relative" style={{ width: "100%", height: box.h, background: "hsl(var(--ivory))" }}>
+        <svg width={box.w} height={box.h} className="block">
           <defs>
-            <pattern id="jig-template" patternUnits="userSpaceOnUse" width={size.w} height={size.h}>
-              <image href={templateUrl} x="0" y="0" width={size.w} height={size.h} preserveAspectRatio="xMidYMid slice" />
-            </pattern>
+            <clipPath id="fit-clip"><rect x={fit.x} y={fit.y} width={fit.w} height={fit.h} /></clipPath>
           </defs>
-          {/* Blank ivory board */}
-          <rect x="0" y="0" width={size.w} height={size.h} fill="hsl(var(--ivory))" />
+          {/* Ivory backdrop board where the image sits (clear, no overlay) */}
+          <rect x={fit.x} y={fit.y} width={fit.w} height={fit.h} fill="hsl(var(--sand) / 0.35)" />
+          {/* Faint grid of unrevealed pieces */}
           {sortedTasks.map((t, idx) => {
-            const c = idx % cols;
-            const r = Math.floor(idx / cols);
-            if (r >= rows) return null;
-            const path = piecePath(c, r);
-            const clipId = `jig-${idx}`;
-            const owner = memberMap.get(t.user_id);
+            const r = rects[idx];
             return (
-              <g key={t.id}
+              <rect key={`bg-${t.id}`} x={r.x} y={r.y} width={r.w} height={r.h}
+                fill="hsl(var(--sand) / 0.25)" stroke="hsl(var(--coffee) / 0.18)" strokeWidth="1" />
+            );
+          })}
+          {/* Revealed pieces: each shows the corresponding slice of the template */}
+          {sortedTasks.map((t, idx) => {
+            const r = rects[idx];
+            if (!t.completed) return null;
+            return (
+              <motion.g key={`rv-${t.id}`}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 260, damping: 20 }}
+                style={{ transformOrigin: `${r.x + r.w / 2}px ${r.y + r.h / 2}px` }}
+              >
+                <clipPath id={`pc-${idx}`}><rect x={r.x} y={r.y} width={r.w} height={r.h} /></clipPath>
+                <g clipPath={`url(#pc-${idx})`}>
+                  <image href={templateUrl} x={fit.x} y={fit.y} width={fit.w} height={fit.h}
+                    preserveAspectRatio="none" />
+                </g>
+                <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none"
+                  stroke="hsl(var(--coffee))" strokeWidth="1.2" opacity="0.55" />
+              </motion.g>
+            );
+          })}
+          {/* Hover hit-test layer */}
+          {sortedTasks.map((t, idx) => {
+            const r = rects[idx];
+            return (
+              <rect key={`hit-${t.id}`} x={r.x} y={r.y} width={r.w} height={r.h}
+                fill="transparent"
                 onMouseMove={(e) => {
-                  const rect = (e.currentTarget.ownerSVGElement!.getBoundingClientRect());
-                  setHover({ idx, x: e.clientX - rect.left, y: e.clientY - rect.top });
+                  const svgRect = (e.currentTarget.ownerSVGElement!.getBoundingClientRect());
+                  setHover({ idx, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
                 }}
                 onMouseLeave={() => setHover(null)}
-              >
-                <clipPath id={clipId}><path d={path} /></clipPath>
-                {/* Faint outline of the piece (the puzzle board) */}
-                <path d={path} fill="hsl(var(--sand) / 0.3)" stroke="hsl(var(--coffee) / 0.25)" strokeWidth="1" />
-                {/* Revealed piece */}
-                {t.completed && (
-                  <motion.g
-                    initial={{ opacity: 0, scale: 0.88 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ type: "spring", stiffness: 260, damping: 18 }}
-                    style={{ transformOrigin: `${c * tileW + tileW / 2}px ${r * tileH + tileH / 2}px` }}
-                  >
-                    <g clipPath={`url(#${clipId})`}>
-                      <rect x="0" y="0" width={size.w} height={size.h} fill="url(#jig-template)" />
-                    </g>
-                    <path d={path} fill="none" stroke="hsl(var(--coffee))" strokeWidth="1.2" opacity="0.7" />
-                  </motion.g>
-                )}
-              </g>
+              />
             );
           })}
         </svg>
@@ -481,7 +471,7 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
           const done = ownerTasks.filter(x => x.completed).length;
           return (
             <div className="absolute pointer-events-none bg-ivory border border-border px-3 py-2 text-xs shadow-md z-10"
-              style={{ left: Math.min(hover.x + 12, size.w - 180), top: Math.min(hover.y + 12, size.h - 60) }}>
+              style={{ left: Math.min(hover.x + 12, box.w - 180), top: Math.min(hover.y + 12, box.h - 60) }}>
               <div className="font-serif text-sm text-coffee">@{owner?.profile?.username ?? "guest"}</div>
               <div className="text-taupe">{done}/{ownerTasks.length} complete</div>
               <div className="mt-1 text-coffee/80">
