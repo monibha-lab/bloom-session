@@ -486,14 +486,22 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
 }
 
 /* ---------------- WebRTC People Grid ---------------- */
-// Mesh P2P with Supabase Realtime broadcast as signaling. STUN-only (free).
-// NOTE: production with strict NATs/firewalls will need TURN servers.
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ],
-};
+// Mesh P2P with Supabase Realtime broadcast as signaling.
+// STUN always on; TURN added when all VITE_WEBRTC_TURN_* env vars are present.
+function buildRtcConfig(): RTCConfiguration {
+  const stunUrl = (import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined) || "stun:stun.l.google.com:19302";
+  const turnUrl = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
+  const turnUser = import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined;
+  const turnCred = import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined;
+  const iceServers: RTCIceServer[] = [{ urls: stunUrl }];
+  if (turnUrl && turnUser && turnCred) {
+    iceServers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
+  }
+  return { iceServers };
+}
+const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
+const HAS_TURN = !!(import.meta.env.VITE_WEBRTC_TURN_URL && import.meta.env.VITE_WEBRTC_TURN_USERNAME && import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL);
+const ICE_TIMEOUT_MS = 15000;
 const MAX_PEERS = 6;
 
 function PeopleGrid({ members, sessionId, userId }: { members: Member[]; sessionId: string; userId?: string }) {
