@@ -7,7 +7,7 @@ import { TopNav } from "@/components/TopNav";
 import { UsernameModal } from "@/components/UsernameModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Star, Flame, BookOpen, Clock, ArrowRight } from "lucide-react";
+import { Star, Flame, BookOpen, Clock } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
 import { toast } from "sonner";
 
@@ -21,7 +21,6 @@ const Dashboard = () => {
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -43,22 +42,7 @@ const Dashboard = () => {
     })();
   }, [user]);
 
-  // Find rejoinable active session
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      const { data: ms } = await supabase
-        .from("session_members").select("session_id")
-        .eq("user_id", user.id);
-      const ids = (ms ?? []).map(m => m.session_id);
-      if (!ids.length) return;
-      const { data: ss } = await supabase
-        .from("sessions").select("id, status")
-        .in("id", ids).in("status", ["active", "lobby"])
-        .order("created_at", { ascending: false }).limit(1);
-      if (ss && ss[0]) setActiveSessionId(ss[0].id);
-    })();
-  }, [user]);
+  // No rejoin: leaving an active session ends it as a failure.
 
   const handleJoin = async () => {
     setJoinError(null);
@@ -103,17 +87,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {activeSessionId && (
-            <div className="editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-taupe">Still open</p>
-                <p className="font-serif text-lg text-coffee">You have an active session waiting.</p>
-              </div>
-              <Button variant="outline" onClick={() => nav(`/session/${activeSessionId}`)}>
-                Rejoin <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
-          )}
 
           <div className="flex flex-col md:flex-row gap-4 md:items-stretch">
             <Button size="lg" onClick={() => nav("/session/setup")} className="md:flex-1 w-full">

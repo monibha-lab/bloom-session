@@ -94,6 +94,7 @@ const Session = () => {
     }
   }, [sessionId, totalElapsedSec, nav]);
 
+  // Auto-finalize when timer hits 0 (host only)
   useEffect(() => {
     if (!session || !user) return;
     if (session.status !== "active") return;
@@ -103,11 +104,22 @@ const Session = () => {
     }
   }, [session, user, startedAt, remainingSec, finalize]);
 
+  // Auto-end on full success (host only)
+  useEffect(() => {
+    if (!session || !user) return;
+    if (session.status !== "active") return;
+    if (session.host_id !== user.id) return;
+    if (tasks.length > 0 && tasks.every(t => t.completed) && !finalizeStarted.current) {
+      finalize(true);
+    }
+  }, [session, user, tasks, finalize]);
+
   useEffect(() => {
     if (!session) return;
     if (session.status === "completed" || session.status === "failed") {
       if (!ended) setEnded({ ok: session.status === "completed" });
-      setTimeout(() => nav("/dashboard"), 4000);
+      const t = setTimeout(() => nav("/dashboard"), 4000);
+      return () => clearTimeout(t);
     }
   }, [session, ended, nav]);
 
@@ -119,14 +131,24 @@ const Session = () => {
     if (error) showSbError("Could not update task", error);
   };
 
+  // Leaving an active session = whole session fails for everyone
   const exitFail = async () => {
-    if (session?.host_id === user?.id) {
-      await finalize(false);
+    if (!session) return nav("/dashboard");
+    if (session.status === "active" || session.status === "lobby") {
+      const allDone = tasks.length > 0 && tasks.every(t => t.completed);
+      await finalize(allDone);
     } else {
-      await supabase.from("session_members").delete().eq("session_id", sessionId).eq("user_id", user!.id);
       nav("/dashboard");
     }
   };
+
+  // Best-effort: warn before tab close during active session
+  useEffect(() => {
+    if (session?.status !== "active") return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [session?.status]);
 
   const fmt = (s: number) => {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
@@ -234,7 +256,7 @@ const Session = () => {
             </div>
           )}
 
-          <PeopleGrid members={members} />
+          <PeopleGrid members={members} sessionId={sessionId} userId={user?.id} />
         </aside>
       </main>
 
@@ -306,87 +328,71 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   tasks: Task[]; members: Member[]; userId?: string; templateUrl: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 560 });
+  const [box, setBox] = useState({ w: 800, h: 560 });
+  const [imgRatio, setImgRatio] = useState<number | null>(null);
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const obs = new ResizeObserver(() => {
-      if (ref.current) setSize({ w: ref.current.clientWidth, h: Math.max(280, Math.min(600, ref.current.clientWidth * 0.7)) });
+      if (ref.current) setBox({ w: ref.current.clientWidth, h: Math.max(280, Math.min(620, ref.current.clientWidth * 0.66)) });
     });
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
   }, []);
 
-  // Build a stable grid of pieces sized to the number of tasks.
+  // Load template natural aspect
+  useEffect(() => {
+    if (!templateUrl) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => setImgRatio(img.naturalWidth / img.naturalHeight);
+    img.src = templateUrl;
+  }, [templateUrl]);
+
+  // Fitted rect (object-fit: contain) inside the box
+  const fit = useMemo(() => {
+    const r = imgRatio ?? (box.w / box.h);
+    const boxR = box.w / box.h;
+    let w = box.w, h = box.h, x = 0, y = 0;
+    if (r > boxR) { h = box.w / r; y = (box.h - h) / 2; }
+    else { w = box.h * r; x = (box.w - w) / 2; }
+    return { x, y, w, h };
+  }, [box, imgRatio]);
+
+  // Grid sized to number of tasks, fitted exactly to image rect (no gaps)
   const total = Math.max(1, tasks.length);
   const { cols, rows } = useMemo(() => {
-    const ratio = size.w / Math.max(1, size.h);
     let bestCols = 1, bestDiff = Infinity;
     for (let c = 1; c <= total; c++) {
       const r = Math.ceil(total / c);
-      const tileRatio = (size.w / c) / (size.h / r);
+      const tileRatio = (fit.w / c) / (fit.h / r);
       const diff = Math.abs(tileRatio - 1);
-      if (diff < bestDiff && r * c >= total) { bestDiff = diff; bestCols = c; }
+      if (diff < bestDiff) { bestDiff = diff; bestCols = c; }
     }
     return { cols: bestCols, rows: Math.ceil(total / bestCols) };
-  }, [total, size]);
+  }, [total, fit]);
 
-  const tileW = size.w / cols;
-  const tileH = size.h / rows;
+  const tileW = fit.w / cols;
+  const tileH = fit.h / rows;
 
-  // Deterministic knob direction per shared edge: + outward from left/top cell, - inward from right/bottom
-  const seedRand = (a: number, b: number) => {
-    const s = Math.sin(a * 374761393 + b * 668265263) * 43758.5453;
-    return s - Math.floor(s);
-  };
-
-  // Returns SVG path for a single jigsaw piece at grid (c,r)
-  const piecePath = (c: number, r: number) => {
-    const x = c * tileW, y = r * tileH;
-    const knob = Math.min(tileW, tileH) * 0.18;
-    // knob +1 means knob bulges outward from this piece on that edge, -1 means socket cuts inward, 0 means flat (boundary)
-    const top = r === 0 ? 0 : (seedRand(c, r) > 0.5 ? 1 : -1) * (-1); // top of (c,r) is bottom of (c,r-1) flipped
-    const right = c === cols - 1 ? 0 : (seedRand(c + 1, r) > 0.5 ? 1 : -1);
-    const bottom = r === rows - 1 ? 0 : (seedRand(c, r + 1) > 0.5 ? 1 : -1) * -1;
-    const left = c === 0 ? 0 : (seedRand(c, r) > 0.5 ? 1 : -1) * -1;
-
-    // Build path
-    const midX = x + tileW / 2;
-    const midY = y + tileH / 2;
-    let d = `M ${x} ${y} `;
-
-    // Top edge
-    if (top === 0) d += `L ${x + tileW} ${y} `;
-    else {
-      d += `L ${midX - knob} ${y} `;
-      d += `C ${midX - knob} ${y - knob * top}, ${midX + knob} ${y - knob * top}, ${midX + knob} ${y} `;
-      d += `L ${x + tileW} ${y} `;
+  // Place "extra" pieces (when total < cols*rows) by widening last-row pieces so they still cover
+  // Map index -> rectangle covering its share of fit area.
+  const rects = useMemo(() => {
+    const out: { x: number; y: number; w: number; h: number; c: number; r: number }[] = [];
+    const lastRowCount = total - (rows - 1) * cols; // pieces in final row
+    for (let i = 0; i < total; i++) {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const isLastRow = r === rows - 1;
+      const countThisRow = isLastRow ? lastRowCount : cols;
+      const w = fit.w / countThisRow;
+      const x = fit.x + c * w;
+      const y = fit.y + r * tileH;
+      out.push({ x, y, w, h: tileH, c, r });
     }
-    // Right edge
-    if (right === 0) d += `L ${x + tileW} ${y + tileH} `;
-    else {
-      d += `L ${x + tileW} ${midY - knob} `;
-      d += `C ${x + tileW + knob * right} ${midY - knob}, ${x + tileW + knob * right} ${midY + knob}, ${x + tileW} ${midY + knob} `;
-      d += `L ${x + tileW} ${y + tileH} `;
-    }
-    // Bottom edge
-    if (bottom === 0) d += `L ${x} ${y + tileH} `;
-    else {
-      d += `L ${midX + knob} ${y + tileH} `;
-      d += `C ${midX + knob} ${y + tileH + knob * bottom}, ${midX - knob} ${y + tileH + knob * bottom}, ${midX - knob} ${y + tileH} `;
-      d += `L ${x} ${y + tileH} `;
-    }
-    // Left edge
-    if (left === 0) d += `L ${x} ${y} `;
-    else {
-      d += `L ${x} ${midY + knob} `;
-      d += `C ${x - knob * left} ${midY + knob}, ${x - knob * left} ${midY - knob}, ${x} ${midY - knob} `;
-      d += `L ${x} ${y} `;
-    }
-    return d + "Z";
-  };
+    return out;
+  }, [total, cols, rows, tileH, fit]);
 
-  // Stable assignment of tasks -> piece indices (sorted by user_id then position so it's consistent across users).
   const sortedTasks = useMemo(() => {
     return [...tasks].sort((a, b) => {
       if (a.user_id < b.user_id) return -1;
@@ -404,48 +410,54 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   return (
     <div ref={ref} className="editorial-panel bg-card p-3 relative">
       <p className="text-xs uppercase tracking-widest text-taupe mb-2">Study canvas · {sortedTasks.length} pieces</p>
-      <div className="relative" style={{ width: "100%", height: size.h }}>
-        <svg width={size.w} height={size.h} className="block">
+      <div className="relative" style={{ width: "100%", height: box.h, background: "hsl(var(--ivory))" }}>
+        <svg width={box.w} height={box.h} className="block">
           <defs>
-            <pattern id="jig-template" patternUnits="userSpaceOnUse" width={size.w} height={size.h}>
-              <image href={templateUrl} x="0" y="0" width={size.w} height={size.h} preserveAspectRatio="xMidYMid slice" />
-            </pattern>
+            <clipPath id="fit-clip"><rect x={fit.x} y={fit.y} width={fit.w} height={fit.h} /></clipPath>
           </defs>
-          {/* Blank ivory board */}
-          <rect x="0" y="0" width={size.w} height={size.h} fill="hsl(var(--ivory))" />
+          {/* Ivory backdrop board where the image sits (clear, no overlay) */}
+          <rect x={fit.x} y={fit.y} width={fit.w} height={fit.h} fill="hsl(var(--sand) / 0.35)" />
+          {/* Faint grid of unrevealed pieces */}
           {sortedTasks.map((t, idx) => {
-            const c = idx % cols;
-            const r = Math.floor(idx / cols);
-            if (r >= rows) return null;
-            const path = piecePath(c, r);
-            const clipId = `jig-${idx}`;
-            const owner = memberMap.get(t.user_id);
+            const r = rects[idx];
             return (
-              <g key={t.id}
+              <rect key={`bg-${t.id}`} x={r.x} y={r.y} width={r.w} height={r.h}
+                fill="hsl(var(--sand) / 0.25)" stroke="hsl(var(--coffee) / 0.18)" strokeWidth="1" />
+            );
+          })}
+          {/* Revealed pieces: each shows the corresponding slice of the template */}
+          {sortedTasks.map((t, idx) => {
+            const r = rects[idx];
+            if (!t.completed) return null;
+            return (
+              <motion.g key={`rv-${t.id}`}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 260, damping: 20 }}
+                style={{ transformOrigin: `${r.x + r.w / 2}px ${r.y + r.h / 2}px` }}
+              >
+                <clipPath id={`pc-${idx}`}><rect x={r.x} y={r.y} width={r.w} height={r.h} /></clipPath>
+                <g clipPath={`url(#pc-${idx})`}>
+                  <image href={templateUrl} x={fit.x} y={fit.y} width={fit.w} height={fit.h}
+                    preserveAspectRatio="none" />
+                </g>
+                <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none"
+                  stroke="hsl(var(--coffee))" strokeWidth="1.2" opacity="0.55" />
+              </motion.g>
+            );
+          })}
+          {/* Hover hit-test layer */}
+          {sortedTasks.map((t, idx) => {
+            const r = rects[idx];
+            return (
+              <rect key={`hit-${t.id}`} x={r.x} y={r.y} width={r.w} height={r.h}
+                fill="transparent"
                 onMouseMove={(e) => {
-                  const rect = (e.currentTarget.ownerSVGElement!.getBoundingClientRect());
-                  setHover({ idx, x: e.clientX - rect.left, y: e.clientY - rect.top });
+                  const svgRect = (e.currentTarget.ownerSVGElement!.getBoundingClientRect());
+                  setHover({ idx, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
                 }}
                 onMouseLeave={() => setHover(null)}
-              >
-                <clipPath id={clipId}><path d={path} /></clipPath>
-                {/* Faint outline of the piece (the puzzle board) */}
-                <path d={path} fill="hsl(var(--sand) / 0.3)" stroke="hsl(var(--coffee) / 0.25)" strokeWidth="1" />
-                {/* Revealed piece */}
-                {t.completed && (
-                  <motion.g
-                    initial={{ opacity: 0, scale: 0.88 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ type: "spring", stiffness: 260, damping: 18 }}
-                    style={{ transformOrigin: `${c * tileW + tileW / 2}px ${r * tileH + tileH / 2}px` }}
-                  >
-                    <g clipPath={`url(#${clipId})`}>
-                      <rect x="0" y="0" width={size.w} height={size.h} fill="url(#jig-template)" />
-                    </g>
-                    <path d={path} fill="none" stroke="hsl(var(--coffee))" strokeWidth="1.2" opacity="0.7" />
-                  </motion.g>
-                )}
-              </g>
+              />
             );
           })}
         </svg>
@@ -459,7 +471,7 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
           const done = ownerTasks.filter(x => x.completed).length;
           return (
             <div className="absolute pointer-events-none bg-ivory border border-border px-3 py-2 text-xs shadow-md z-10"
-              style={{ left: Math.min(hover.x + 12, size.w - 180), top: Math.min(hover.y + 12, size.h - 60) }}>
+              style={{ left: Math.min(hover.x + 12, box.w - 180), top: Math.min(hover.y + 12, box.h - 60) }}>
               <div className="font-serif text-sm text-coffee">@{owner?.profile?.username ?? "guest"}</div>
               <div className="text-taupe">{done}/{ownerTasks.length} complete</div>
               <div className="mt-1 text-coffee/80">
@@ -473,65 +485,224 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   );
 }
 
-function PeopleGrid({ members }: { members: Member[] }) {
+/* ---------------- WebRTC People Grid ---------------- */
+// Mesh P2P with Supabase Realtime broadcast as signaling. STUN-only (free).
+// NOTE: production with strict NATs/firewalls will need TURN servers.
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
+};
+const MAX_PEERS = 6;
+
+function PeopleGrid({ members, sessionId, userId }: { members: Member[]; sessionId: string; userId?: string }) {
+  const [camOn, setCamOn] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteMuted, setRemoteMuted] = useState<Record<string, { cam: boolean; mic: boolean }>>({});
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  const ensureLocalStream = useCallback(async (wantCam: boolean, wantMic: boolean) => {
+    if (!wantCam && !wantMic) {
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      // Remove tracks from all peers
+      peersRef.current.forEach(pc => pc.getSenders().forEach(s => s.track && pc.removeTrack(s)));
+      return null;
+    }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: wantCam, audio: wantMic });
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = s;
+      setDenied(false);
+      // Attach to existing peers
+      peersRef.current.forEach(pc => {
+        s.getTracks().forEach(t => pc.addTrack(t, s));
+      });
+      return s;
+    } catch (err: any) {
+      console.error("getUserMedia failed", err);
+      if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+        setDenied(true);
+        toast.error("Camera/mic permission denied. Enable it in your browser settings.");
+      } else {
+        toast.error(`Could not access camera/mic: ${err?.message ?? "unknown"}`);
+      }
+      setCamOn(false); setMicOn(false);
+      return null;
+    }
+  }, []);
+
+  // Toggle handlers
+  const toggleCam = async () => {
+    const next = !camOn;
+    setCamOn(next);
+    await ensureLocalStream(next, micOn);
+    broadcastState(next, micOn);
+  };
+  const toggleMic = async () => {
+    const next = !micOn;
+    setMicOn(next);
+    await ensureLocalStream(camOn, next);
+    broadcastState(camOn, next);
+  };
+
+  const broadcastState = (cam: boolean, mic: boolean) => {
+    channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
+  };
+
+  const createPeer = useCallback((peerId: string, initiator: boolean) => {
+    if (peersRef.current.has(peerId)) return peersRef.current.get(peerId)!;
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    peersRef.current.set(peerId, pc);
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current!));
+    }
+
+    pc.ontrack = (e) => {
+      setRemoteStreams(prev => ({ ...prev, [peerId]: e.streams[0] }));
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        channelRef.current?.send({ type: "broadcast", event: "ice", payload: { from: userId, to: peerId, candidate: e.candidate } });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+        // Will be cleaned on member leave
+      }
+    };
+
+    if (initiator) {
+      (async () => {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: offer } });
+        } catch (e) { console.error("offer failed", e); }
+      })();
+    }
+    return pc;
+  }, [userId]);
+
+  const closePeer = (peerId: string) => {
+    const pc = peersRef.current.get(peerId);
+    pc?.close();
+    peersRef.current.delete(peerId);
+    setRemoteStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    setRemoteMuted(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+  };
+
+  // Signaling channel
+  useEffect(() => {
+    if (!userId || !sessionId) return;
+    const ch = supabase.channel(`rtc:${sessionId}`, { config: { broadcast: { self: false }, presence: { key: userId } } });
+    channelRef.current = ch;
+
+    ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = createPeer(payload.from, false);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: answer } });
+      } catch (e) { console.error("answer failed", e); }
+    });
+    ch.on("broadcast", { event: "answer" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = peersRef.current.get(payload.from);
+      if (!pc) return;
+      try { await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)); }
+      catch (e) { console.error("setRemoteDescription answer", e); }
+    });
+    ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = peersRef.current.get(payload.from);
+      if (!pc) return;
+      try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); }
+      catch (e) { console.error("addIceCandidate", e); }
+    });
+    ch.on("broadcast", { event: "media-state" }, ({ payload }) => {
+      if (!payload?.from || payload.from === userId) return;
+      setRemoteMuted(prev => ({ ...prev, [payload.from]: { cam: !!payload.cam, mic: !!payload.mic } }));
+    });
+    ch.on("presence", { event: "join" }, ({ key }) => {
+      if (key === userId) return;
+      // Lower id initiates to avoid double-offer
+      if (userId < key && peersRef.current.size < MAX_PEERS) {
+        createPeer(key, true);
+      }
+    });
+    ch.on("presence", { event: "leave" }, ({ key }) => {
+      if (key !== userId) closePeer(key);
+    });
+
+    ch.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await ch.track({ user_id: userId });
+      }
+    });
+
+    return () => {
+      peersRef.current.forEach(pc => pc.close());
+      peersRef.current.clear();
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      supabase.removeChannel(ch);
+      channelRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, sessionId]);
+
   return (
     <div className="editorial-panel bg-card p-5">
-      <h3 className="font-serif text-2xl mb-3">In the room</h3>
-      <div className="grid grid-cols-2 gap-3">
-        {members.map(m => <PersonTile key={m.user_id} member={m} />)}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-serif text-2xl">In the room</h3>
+        <div className="flex gap-2">
+          <button onClick={toggleCam} title={camOn ? "Turn camera off" : "Turn camera on"}
+            className={`p-2 rounded-sm border ${camOn ? "bg-coffee text-ivory" : "bg-ivory text-coffee border-border"}`}>
+            {camOn ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
+          </button>
+          <button onClick={toggleMic} title={micOn ? "Mute mic" : "Unmute mic"}
+            className={`p-2 rounded-sm border ${micOn ? "bg-coffee text-ivory" : "bg-ivory text-coffee border-border"}`}>
+            {micOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
+      {denied && <p className="text-xs text-destructive mb-2">Camera/mic blocked. Check browser permissions.</p>}
+      <div className="grid grid-cols-2 gap-3">
+        {members.slice(0, MAX_PEERS).map(m => {
+          const isMe = m.user_id === userId;
+          const stream = isMe ? localStreamRef.current : remoteStreams[m.user_id];
+          const camActive = isMe ? camOn : (remoteMuted[m.user_id]?.cam ?? false);
+          const micActive = isMe ? micOn : (remoteMuted[m.user_id]?.mic ?? false);
+          return (
+            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} />
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[10px] text-taupe italic">P2P video over free STUN. Strict networks may need TURN.</p>
     </div>
   );
 }
 
-function PersonTile({ member }: { member: Member }) {
+function RemoteTile({ member, stream, camOn, micOn, isMe }: {
+  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const { user } = useAuth();
-  const isMe = user?.id === member.user_id;
-  const [cam, setCam] = useState(false);
-  const [mic, setMic] = useState(false);
-  const [denied, setDenied] = useState(false);
-
-  const stopAll = () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-  };
-
   useEffect(() => {
-    if (!isMe) return;
-    let cancelled = false;
-    if (cam || mic) {
-      navigator.mediaDevices.getUserMedia({ video: cam, audio: mic })
-        .then(s => {
-          if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
-          stopAll();
-          streamRef.current = s;
-          setDenied(false);
-          if (videoRef.current && cam) videoRef.current.srcObject = s;
-        })
-        .catch((err) => {
-          setCam(false); setMic(false);
-          if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
-            setDenied(true);
-            toast.error("Camera/mic permission denied. Enable it in your browser settings.");
-          } else {
-            toast.error(`Could not access camera/mic: ${err?.message ?? "unknown"}`);
-          }
-        });
-    } else {
-      stopAll();
-    }
-    return () => { cancelled = true; };
-  }, [cam, mic, isMe]);
-
-  useEffect(() => () => stopAll(), []);
-
+    if (videoRef.current) videoRef.current.srcObject = stream ?? null;
+  }, [stream]);
   return (
     <div className="aspect-video bg-cocoa relative overflow-hidden border border-border/60">
-      {isMe && cam ? (
-        <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+      {camOn && stream ? (
+        <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
       ) : (
         <div className="w-full h-full grid place-items-center bg-sand">
           <span className="font-serif text-2xl text-coffee">{(member.profile?.username ?? "?")[0]?.toUpperCase()}</span>
@@ -540,19 +711,9 @@ function PersonTile({ member }: { member: Member }) {
       <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
         @{member.profile?.username ?? "guest"}{isMe && " (you)"}
       </div>
-      {isMe && denied && (
-        <div className="absolute inset-x-1 top-1 text-[10px] text-ivory bg-destructive/80 px-1.5 py-0.5 rounded-sm">
-          Permission denied — check browser settings
-        </div>
-      )}
-      {isMe && (
-        <div className="absolute top-1 right-1 flex gap-1">
-          <button onClick={() => setCam(c => !c)} title={cam ? "Turn camera off" : "Turn camera on"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
-            {cam ? <Camera className="w-3 h-3" /> : <CameraOff className="w-3 h-3" />}
-          </button>
-          <button onClick={() => setMic(c => !c)} title={mic ? "Mute mic" : "Unmute mic"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
-            {mic ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
-          </button>
+      {!micOn && (
+        <div className="absolute bottom-1 right-1 bg-coffee/80 text-ivory p-1 rounded-sm">
+          <MicOff className="w-3 h-3" />
         </div>
       )}
     </div>
