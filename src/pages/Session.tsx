@@ -485,65 +485,224 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
   );
 }
 
-function PeopleGrid({ members }: { members: Member[] }) {
+/* ---------------- WebRTC People Grid ---------------- */
+// Mesh P2P with Supabase Realtime broadcast as signaling. STUN-only (free).
+// NOTE: production with strict NATs/firewalls will need TURN servers.
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
+};
+const MAX_PEERS = 6;
+
+function PeopleGrid({ members, sessionId, userId }: { members: Member[]; sessionId: string; userId?: string }) {
+  const [camOn, setCamOn] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteMuted, setRemoteMuted] = useState<Record<string, { cam: boolean; mic: boolean }>>({});
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  const ensureLocalStream = useCallback(async (wantCam: boolean, wantMic: boolean) => {
+    if (!wantCam && !wantMic) {
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      // Remove tracks from all peers
+      peersRef.current.forEach(pc => pc.getSenders().forEach(s => s.track && pc.removeTrack(s)));
+      return null;
+    }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: wantCam, audio: wantMic });
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = s;
+      setDenied(false);
+      // Attach to existing peers
+      peersRef.current.forEach(pc => {
+        s.getTracks().forEach(t => pc.addTrack(t, s));
+      });
+      return s;
+    } catch (err: any) {
+      console.error("getUserMedia failed", err);
+      if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+        setDenied(true);
+        toast.error("Camera/mic permission denied. Enable it in your browser settings.");
+      } else {
+        toast.error(`Could not access camera/mic: ${err?.message ?? "unknown"}`);
+      }
+      setCamOn(false); setMicOn(false);
+      return null;
+    }
+  }, []);
+
+  // Toggle handlers
+  const toggleCam = async () => {
+    const next = !camOn;
+    setCamOn(next);
+    await ensureLocalStream(next, micOn);
+    broadcastState(next, micOn);
+  };
+  const toggleMic = async () => {
+    const next = !micOn;
+    setMicOn(next);
+    await ensureLocalStream(camOn, next);
+    broadcastState(camOn, next);
+  };
+
+  const broadcastState = (cam: boolean, mic: boolean) => {
+    channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
+  };
+
+  const createPeer = useCallback((peerId: string, initiator: boolean) => {
+    if (peersRef.current.has(peerId)) return peersRef.current.get(peerId)!;
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    peersRef.current.set(peerId, pc);
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current!));
+    }
+
+    pc.ontrack = (e) => {
+      setRemoteStreams(prev => ({ ...prev, [peerId]: e.streams[0] }));
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        channelRef.current?.send({ type: "broadcast", event: "ice", payload: { from: userId, to: peerId, candidate: e.candidate } });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+        // Will be cleaned on member leave
+      }
+    };
+
+    if (initiator) {
+      (async () => {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: offer } });
+        } catch (e) { console.error("offer failed", e); }
+      })();
+    }
+    return pc;
+  }, [userId]);
+
+  const closePeer = (peerId: string) => {
+    const pc = peersRef.current.get(peerId);
+    pc?.close();
+    peersRef.current.delete(peerId);
+    setRemoteStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    setRemoteMuted(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+  };
+
+  // Signaling channel
+  useEffect(() => {
+    if (!userId || !sessionId) return;
+    const ch = supabase.channel(`rtc:${sessionId}`, { config: { broadcast: { self: false }, presence: { key: userId } } });
+    channelRef.current = ch;
+
+    ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = createPeer(payload.from, false);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: answer } });
+      } catch (e) { console.error("answer failed", e); }
+    });
+    ch.on("broadcast", { event: "answer" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = peersRef.current.get(payload.from);
+      if (!pc) return;
+      try { await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)); }
+      catch (e) { console.error("setRemoteDescription answer", e); }
+    });
+    ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
+      if (payload.to !== userId) return;
+      const pc = peersRef.current.get(payload.from);
+      if (!pc) return;
+      try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); }
+      catch (e) { console.error("addIceCandidate", e); }
+    });
+    ch.on("broadcast", { event: "media-state" }, ({ payload }) => {
+      if (!payload?.from || payload.from === userId) return;
+      setRemoteMuted(prev => ({ ...prev, [payload.from]: { cam: !!payload.cam, mic: !!payload.mic } }));
+    });
+    ch.on("presence", { event: "join" }, ({ key }) => {
+      if (key === userId) return;
+      // Lower id initiates to avoid double-offer
+      if (userId < key && peersRef.current.size < MAX_PEERS) {
+        createPeer(key, true);
+      }
+    });
+    ch.on("presence", { event: "leave" }, ({ key }) => {
+      if (key !== userId) closePeer(key);
+    });
+
+    ch.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await ch.track({ user_id: userId });
+      }
+    });
+
+    return () => {
+      peersRef.current.forEach(pc => pc.close());
+      peersRef.current.clear();
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      supabase.removeChannel(ch);
+      channelRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, sessionId]);
+
   return (
     <div className="editorial-panel bg-card p-5">
-      <h3 className="font-serif text-2xl mb-3">In the room</h3>
-      <div className="grid grid-cols-2 gap-3">
-        {members.map(m => <PersonTile key={m.user_id} member={m} />)}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-serif text-2xl">In the room</h3>
+        <div className="flex gap-2">
+          <button onClick={toggleCam} title={camOn ? "Turn camera off" : "Turn camera on"}
+            className={`p-2 rounded-sm border ${camOn ? "bg-coffee text-ivory" : "bg-ivory text-coffee border-border"}`}>
+            {camOn ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
+          </button>
+          <button onClick={toggleMic} title={micOn ? "Mute mic" : "Unmute mic"}
+            className={`p-2 rounded-sm border ${micOn ? "bg-coffee text-ivory" : "bg-ivory text-coffee border-border"}`}>
+            {micOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
+      {denied && <p className="text-xs text-destructive mb-2">Camera/mic blocked. Check browser permissions.</p>}
+      <div className="grid grid-cols-2 gap-3">
+        {members.slice(0, MAX_PEERS).map(m => {
+          const isMe = m.user_id === userId;
+          const stream = isMe ? localStreamRef.current : remoteStreams[m.user_id];
+          const camActive = isMe ? camOn : (remoteMuted[m.user_id]?.cam ?? false);
+          const micActive = isMe ? micOn : (remoteMuted[m.user_id]?.mic ?? false);
+          return (
+            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} />
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[10px] text-taupe italic">P2P video over free STUN. Strict networks may need TURN.</p>
     </div>
   );
 }
 
-function PersonTile({ member }: { member: Member }) {
+function RemoteTile({ member, stream, camOn, micOn, isMe }: {
+  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const { user } = useAuth();
-  const isMe = user?.id === member.user_id;
-  const [cam, setCam] = useState(false);
-  const [mic, setMic] = useState(false);
-  const [denied, setDenied] = useState(false);
-
-  const stopAll = () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-  };
-
   useEffect(() => {
-    if (!isMe) return;
-    let cancelled = false;
-    if (cam || mic) {
-      navigator.mediaDevices.getUserMedia({ video: cam, audio: mic })
-        .then(s => {
-          if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
-          stopAll();
-          streamRef.current = s;
-          setDenied(false);
-          if (videoRef.current && cam) videoRef.current.srcObject = s;
-        })
-        .catch((err) => {
-          setCam(false); setMic(false);
-          if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
-            setDenied(true);
-            toast.error("Camera/mic permission denied. Enable it in your browser settings.");
-          } else {
-            toast.error(`Could not access camera/mic: ${err?.message ?? "unknown"}`);
-          }
-        });
-    } else {
-      stopAll();
-    }
-    return () => { cancelled = true; };
-  }, [cam, mic, isMe]);
-
-  useEffect(() => () => stopAll(), []);
-
+    if (videoRef.current) videoRef.current.srcObject = stream ?? null;
+  }, [stream]);
   return (
     <div className="aspect-video bg-cocoa relative overflow-hidden border border-border/60">
-      {isMe && cam ? (
-        <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+      {camOn && stream ? (
+        <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
       ) : (
         <div className="w-full h-full grid place-items-center bg-sand">
           <span className="font-serif text-2xl text-coffee">{(member.profile?.username ?? "?")[0]?.toUpperCase()}</span>
@@ -552,19 +711,9 @@ function PersonTile({ member }: { member: Member }) {
       <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
         @{member.profile?.username ?? "guest"}{isMe && " (you)"}
       </div>
-      {isMe && denied && (
-        <div className="absolute inset-x-1 top-1 text-[10px] text-ivory bg-destructive/80 px-1.5 py-0.5 rounded-sm">
-          Permission denied — check browser settings
-        </div>
-      )}
-      {isMe && (
-        <div className="absolute top-1 right-1 flex gap-1">
-          <button onClick={() => setCam(c => !c)} title={cam ? "Turn camera off" : "Turn camera on"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
-            {cam ? <Camera className="w-3 h-3" /> : <CameraOff className="w-3 h-3" />}
-          </button>
-          <button onClick={() => setMic(c => !c)} title={mic ? "Mute mic" : "Unmute mic"} className="bg-coffee/80 text-ivory p-1 rounded-sm">
-            {mic ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
-          </button>
+      {!micOn && (
+        <div className="absolute bottom-1 right-1 bg-coffee/80 text-ivory p-1 rounded-sm">
+          <MicOff className="w-3 h-3" />
         </div>
       )}
     </div>
