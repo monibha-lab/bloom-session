@@ -181,12 +181,12 @@ const Session = () => {
 
       <header className="relative z-10 border-b border-border/60 bg-ivory/80 backdrop-blur">
         <div className="container mx-auto px-4 py-3 md:py-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 md:gap-4 min-w-0">
-            <p className="font-serif text-lg md:text-xl text-coffee">FocusForge<span className="text-clay">.</span></p>
-            <span className="text-[10px] md:text-xs uppercase tracking-widest text-taupe truncate">{session.mode === "solo" ? "Solo" : "Group"} · {session.timer_type}</span>
+          <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
+            <p className="font-serif text-lg md:text-xl text-coffee shrink-0">FocusForge<span className="text-clay">.</span></p>
+            <span className="text-[10px] md:text-xs uppercase tracking-widest text-taupe truncate min-w-0">{session.mode === "solo" ? "Solo" : "Group"} · {session.timer_type}</span>
           </div>
           <div className="font-serif text-2xl md:text-3xl tabular-nums order-3 md:order-none w-full md:w-auto text-center">{fmt(remainingSec)}</div>
-          <Button variant="outline" size="sm" onClick={exitFail}>
+          <Button variant="outline" size="sm" onClick={exitFail} className="shrink-0">
             <X className="w-4 h-4" /> {session.host_id === user?.id ? "End" : "Leave"}
           </Button>
         </div>
@@ -196,32 +196,32 @@ const Session = () => {
       </header>
 
       <main className="container mx-auto px-4 py-6 md:py-8 grid lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-8">
+        <section className="lg:col-span-8 min-w-0 order-1">
           <JigsawCanvas tasks={tasks} members={members} userId={user?.id} templateUrl={session.template_url} />
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-            <div className="editorial-panel bg-card p-3">
+            <div className="editorial-panel bg-card p-3 min-w-0">
               <p className="text-[10px] uppercase tracking-widest text-taupe">Group progress</p>
               <p className="font-serif text-xl text-coffee">{completedTasks}/{totalTasks} <span className="text-sm text-taupe">· {groupPct}%</span></p>
             </div>
-            <div className="editorial-panel bg-card p-3">
+            <div className="editorial-panel bg-card p-3 min-w-0">
               <p className="text-[10px] uppercase tracking-widest text-taupe">Your progress</p>
               <p className="font-serif text-xl text-coffee">{myDone}/{myTasks.length} <span className="text-sm text-taupe">· {myPct}%</span></p>
             </div>
           </div>
         </section>
 
-        <aside className="lg:col-span-4 space-y-6">
-          <div className="editorial-panel bg-card p-5">
+        <aside className="lg:col-span-4 space-y-6 min-w-0 order-2">
+          <div className="editorial-panel bg-card p-5 min-w-0">
             <h3 className="font-serif text-2xl mb-3">Your tasks</h3>
             {myTasks.length === 0 ? (
               <p className="text-taupe text-sm italic">No tasks added.</p>
             ) : (
               <ul className="space-y-2">
                 {myTasks.map(t => (
-                  <li key={t.id} className="flex items-center gap-3">
-                    <Checkbox checked={t.completed} onCheckedChange={() => toggleTask(t)} />
-                    <span className={`text-sm ${t.completed ? "line-through text-taupe" : "text-coffee"}`}>{t.title}</span>
-                    {t.visibility === "secret" && <EyeOff className="w-3 h-3 text-taupe" />}
+                  <li key={t.id} className="flex items-start gap-3 min-w-0">
+                    <Checkbox checked={t.completed} onCheckedChange={() => toggleTask(t)} className="mt-0.5 shrink-0" />
+                    <span className={`text-sm break-words min-w-0 flex-1 ${t.completed ? "line-through text-taupe" : "text-coffee"}`}>{t.title}</span>
+                    {t.visibility === "secret" && <EyeOff className="w-3 h-3 text-taupe shrink-0 mt-1" />}
                   </li>
                 ))}
               </ul>
@@ -230,26 +230,26 @@ const Session = () => {
           </div>
 
           {session.mode !== "solo" && (
-            <div className="editorial-panel bg-card p-5">
+            <div className="editorial-panel bg-card p-5 min-w-0">
               <h3 className="font-serif text-xl mb-3">Members</h3>
               <ul className="space-y-2 text-sm">
                 {members.filter(m => m.user_id !== user?.id).map(m => {
                   const ut = tasks.filter(t => t.user_id === m.user_id);
                   const done = ut.filter(t => t.completed).length;
                   return (
-                    <li key={m.user_id}>
-                      <div className="flex items-center justify-between">
-                        <span>@{m.profile?.username ?? "guest"}</span>
-                        <span className="text-taupe">{done}/{ut.length}</span>
+                    <li key={m.user_id} className="min-w-0">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className="truncate min-w-0">@{m.profile?.username ?? "guest"}</span>
+                        <span className="text-taupe shrink-0">{done}/{ut.length}</span>
                       </div>
                       <ul className="mt-1 ml-3 space-y-0.5">
                         {ut.map(t => (
-                          <li key={t.id} className="text-xs text-taupe flex items-center gap-2">
-                            <span className={`w-1.5 h-1.5 rounded-full ${t.completed ? "bg-olive" : "bg-border"}`} />
+                          <li key={t.id} className="text-xs text-taupe flex items-start gap-2 min-w-0">
+                            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${t.completed ? "bg-olive" : "bg-border"}`} />
                             {t.visibility === "secret" ? (
                               <span className="italic flex items-center gap-1"><EyeOff className="w-3 h-3" /> Secret task</span>
                             ) : (
-                              <span className={t.completed ? "line-through" : ""}>{t.title}</span>
+                              <span className={`break-words min-w-0 flex-1 ${t.completed ? "line-through" : ""}`}>{t.title}</span>
                             )}
                           </li>
                         ))}
@@ -289,27 +289,27 @@ function LobbyView({ session, members, tasks, userId, sessionId, onLeave }: {
         <p className="text-coffee/70 mt-2">When everyone is ready, the chapter opens.</p>
 
         {session.code && (
-          <div className="mt-6 editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
+          <div className="mt-6 editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3 min-w-0">
+            <div className="min-w-0">
               <p className="text-xs uppercase tracking-widest text-taupe">Invitation code</p>
-              <p className="font-serif text-2xl tracking-[0.3em]">{session.code}</p>
+              <p className="font-serif text-2xl tracking-[0.3em] break-all">{session.code}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => {
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => {
               navigator.clipboard.writeText(session.code);
               toast.success("Code copied");
             }}><Copy className="w-4 h-4" /> Copy</Button>
           </div>
         )}
 
-        <div className="mt-6 editorial-panel bg-card p-4">
+        <div className="mt-6 editorial-panel bg-card p-4 min-w-0">
           <p className="text-xs uppercase tracking-widest text-taupe mb-3">Who's here</p>
           <ul className="space-y-2 text-sm">
             {members.map(m => {
               const c = tasks.filter(t => t.user_id === m.user_id).length;
               return (
-                <li key={m.user_id} className="flex items-center justify-between">
-                  <span>@{m.profile?.username ?? "guest"}{m.user_id === userId && " (you)"}{m.user_id === session.host_id && " · host"}</span>
-                  <span className={c > 0 ? "text-olive" : "text-taupe italic"}>{c > 0 ? `Ready · ${c} task${c > 1 ? "s" : ""}` : "Awaiting tasks…"}</span>
+                <li key={m.user_id} className="flex items-center justify-between gap-2 min-w-0">
+                  <span className="truncate min-w-0">@{m.profile?.username ?? "guest"}{m.user_id === userId && " (you)"}{m.user_id === session.host_id && " · host"}</span>
+                  <span className={`shrink-0 text-right ${c > 0 ? "text-olive" : "text-taupe italic"}`}>{c > 0 ? `Ready · ${c} task${c > 1 ? "s" : ""}` : "Awaiting…"}</span>
                 </li>
               );
             })}
@@ -754,7 +754,7 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         </div>
       </div>
       {denied && <p className="text-xs text-destructive mb-2">Camera/mic blocked. Check browser permissions.</p>}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
         {members.slice(0, MAX_PEERS).map(m => {
           const isMe = m.user_id === userId;
           const stream = isMe ? localStreamRef.current : remoteStreams[m.user_id];
@@ -802,7 +802,7 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
+      <div className="absolute bottom-1 left-2 right-8 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm truncate">
         @{member.profile?.username ?? "guest"}{isMe && " (you)"}
       </div>
       {!micOn && (
