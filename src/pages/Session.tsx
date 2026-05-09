@@ -289,27 +289,27 @@ function LobbyView({ session, members, tasks, userId, sessionId, onLeave }: {
         <p className="text-coffee/70 mt-2">When everyone is ready, the chapter opens.</p>
 
         {session.code && (
-          <div className="mt-6 editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
+          <div className="mt-6 editorial-panel bg-blush p-4 flex flex-wrap items-center justify-between gap-3 min-w-0">
+            <div className="min-w-0">
               <p className="text-xs uppercase tracking-widest text-taupe">Invitation code</p>
-              <p className="font-serif text-2xl tracking-[0.3em]">{session.code}</p>
+              <p className="font-serif text-2xl tracking-[0.3em] break-all">{session.code}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => {
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => {
               navigator.clipboard.writeText(session.code);
               toast.success("Code copied");
             }}><Copy className="w-4 h-4" /> Copy</Button>
           </div>
         )}
 
-        <div className="mt-6 editorial-panel bg-card p-4">
+        <div className="mt-6 editorial-panel bg-card p-4 min-w-0">
           <p className="text-xs uppercase tracking-widest text-taupe mb-3">Who's here</p>
           <ul className="space-y-2 text-sm">
             {members.map(m => {
               const c = tasks.filter(t => t.user_id === m.user_id).length;
               return (
-                <li key={m.user_id} className="flex items-center justify-between">
-                  <span>@{m.profile?.username ?? "guest"}{m.user_id === userId && " (you)"}{m.user_id === session.host_id && " · host"}</span>
-                  <span className={c > 0 ? "text-olive" : "text-taupe italic"}>{c > 0 ? `Ready · ${c} task${c > 1 ? "s" : ""}` : "Awaiting tasks…"}</span>
+                <li key={m.user_id} className="flex items-center justify-between gap-2 min-w-0">
+                  <span className="truncate min-w-0">@{m.profile?.username ?? "guest"}{m.user_id === userId && " (you)"}{m.user_id === session.host_id && " · host"}</span>
+                  <span className={`shrink-0 text-right ${c > 0 ? "text-olive" : "text-taupe italic"}`}>{c > 0 ? `Ready · ${c} task${c > 1 ? "s" : ""}` : "Awaiting…"}</span>
                 </li>
               );
             })}
