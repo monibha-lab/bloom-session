@@ -360,7 +360,7 @@ const SessionSetup = () => {
               <h1 className="font-serif text-3xl md:text-4xl mb-6">Set your timer</h1>
               <div className="grid sm:grid-cols-2 gap-4">
                 <ModeCard active={timerType === "custom"} onClick={() => setTimerType("custom")} icon={<></>} title="Custom"
-                  body="One quiet block from 10 minutes to 8 hours." />
+                  body="One quiet block from 2 minutes to 8 hours." />
                 <ModeCard active={timerType === "pomodoro"} onClick={() => setTimerType("pomodoro")} icon={<></>} title="Pomodoro"
                   body="Four 25-minute chapters with 5-min breaks, then a 15-min rest." />
               </div>
@@ -368,10 +368,10 @@ const SessionSetup = () => {
               {timerType === "custom" && (
                 <div className="mt-6 max-w-md">
                   <Label>Duration: {Math.floor(minutes / 60)}h {minutes % 60}m</Label>
-                  <input type="range" min={10} max={480} step={5} value={minutes}
-                    onChange={(e) => setMinutes(parseInt(e.target.value))}
+                  <input type="range" min={2} max={480} step={1} value={minutes}
+                    onChange={(e) => setMinutes(Math.max(2, parseInt(e.target.value) || 2))}
                     className="w-full accent-coffee" />
-                  <div className="flex justify-between text-xs text-taupe mt-1"><span>10 min</span><span>8 h</span></div>
+                  <div className="flex justify-between text-xs text-taupe mt-1"><span>2 min</span><span>8 h</span></div>
                 </div>
               )}
 
