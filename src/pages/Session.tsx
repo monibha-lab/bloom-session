@@ -754,7 +754,7 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         </div>
       </div>
       {denied && <p className="text-xs text-destructive mb-2">Camera/mic blocked. Check browser permissions.</p>}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
         {members.slice(0, MAX_PEERS).map(m => {
           const isMe = m.user_id === userId;
           const stream = isMe ? localStreamRef.current : remoteStreams[m.user_id];
