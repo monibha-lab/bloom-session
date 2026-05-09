@@ -802,7 +802,7 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm">
+      <div className="absolute bottom-1 left-2 right-8 text-xs text-ivory bg-coffee/70 px-1.5 py-0.5 rounded-sm truncate">
         @{member.profile?.username ?? "guest"}{isMe && " (you)"}
       </div>
       {!micOn && (
