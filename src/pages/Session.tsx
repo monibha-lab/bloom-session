@@ -85,40 +85,40 @@ const Session = () => {
       const ok = data?.succeeded ?? succeeded;
       setEnded({ ok });
       if (ok) {
-        confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ["#C99678", "#4B2E24", "#EBD8CC", "#8A8A66"] });
+        confetti({ particleCount: 160, spread: 90, origin: { y: 0.6 }, colors: ["#C99678", "#4B2E24", "#EBD8CC", "#8A8A66"] });
       }
-      setTimeout(() => nav("/dashboard"), 4000);
+      setTimeout(() => nav("/dashboard"), 3500);
     } catch (e: any) {
       toast.error(e?.message ?? "Failed to finalize");
       finalizeStarted.current = false;
     }
   }, [sessionId, totalElapsedSec, nav]);
 
-  // Auto-finalize when timer hits 0 (host only)
+  // Auto-end on full task completion (any client; edge function is idempotent)
   useEffect(() => {
     if (!session || !user) return;
     if (session.status !== "active") return;
-    if (session.host_id !== user.id) return;
-    if (startedAt && remainingSec === 0 && !finalizeStarted.current) {
-      finalize(true);
-    }
-  }, [session, user, startedAt, remainingSec, finalize]);
-
-  // Auto-end on full success (host only)
-  useEffect(() => {
-    if (!session || !user) return;
-    if (session.status !== "active") return;
-    if (session.host_id !== user.id) return;
     if (tasks.length > 0 && tasks.every(t => t.completed) && !finalizeStarted.current) {
       finalize(true);
     }
   }, [session, user, tasks, finalize]);
 
+  // Timer hits zero → success only if all tasks complete; otherwise fail (host triggers)
+  useEffect(() => {
+    if (!session || !user) return;
+    if (session.status !== "active") return;
+    if (session.host_id !== user.id) return;
+    if (startedAt && remainingSec === 0 && !finalizeStarted.current) {
+      const allDone = tasks.length > 0 && tasks.every(t => t.completed);
+      finalize(allDone);
+    }
+  }, [session, user, startedAt, remainingSec, tasks, finalize]);
+
   useEffect(() => {
     if (!session) return;
     if (session.status === "completed" || session.status === "failed") {
       if (!ended) setEnded({ ok: session.status === "completed" });
-      const t = setTimeout(() => nav("/dashboard"), 4000);
+      const t = setTimeout(() => nav("/dashboard"), 3500);
       return () => clearTimeout(t);
     }
   }, [session, ended, nav]);
@@ -127,19 +127,24 @@ const Session = () => {
   const toggleTask = async (t: Task) => {
     if (!user) return;
     if (session?.status !== "active") return;
+    if (finalizeStarted.current) return;
     const { error } = await supabase.from("tasks").update({ completed: !t.completed }).eq("id", t.id);
     if (error) showSbError("Could not update task", error);
   };
 
-  // Leaving an active session = whole session fails for everyone
+  // End/Leave with confirmation
   const exitFail = async () => {
     if (!session) return nav("/dashboard");
-    if (session.status === "active" || session.status === "lobby") {
-      const allDone = tasks.length > 0 && tasks.every(t => t.completed);
-      await finalize(allDone);
-    } else {
-      nav("/dashboard");
+    if (session.status === "lobby") return nav("/dashboard");
+    if (session.status !== "active") return nav("/dashboard");
+    const allDone = tasks.length > 0 && tasks.every(t => t.completed);
+    if (allDone) {
+      await finalize(true);
+      return;
     }
+    const ok = window.confirm("Ending now before the puzzle is complete will fail the session for everyone.");
+    if (!ok) return;
+    await finalize(false);
   };
 
   // Best-effort: warn before tab close during active session
