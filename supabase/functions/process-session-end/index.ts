@@ -44,13 +44,9 @@ Deno.serve(async (req) => {
       .from('sessions').select('*').eq('id', session_id).single();
     if (sErr || !session) return json({ error: 'Session not found' }, 404);
 
-    // Host can finalize either way; members can only finalize as failure (when leaving early)
-    if (session.host_id !== callerId && succeeded) {
-      return json({ error: 'Only host can mark success' }, 403);
-    }
-
+    // Anyone in the session can finalize. Idempotent: if already ended, return.
     if (session.status === 'completed' || session.status === 'failed') {
-      return json({ ok: true, already: true });
+      return json({ ok: true, already: true, succeeded: session.status === 'completed' });
     }
 
     // Members
@@ -69,58 +65,33 @@ Deno.serve(async (req) => {
       if (t.completed) e.done++;
     }
 
-    const minDuration = duration_seconds >= 600; // 10 minutes
-    const isGroup = session.mode === 'group' && memberIds.length > 1;
-    const baseStars = Math.max(1, Math.floor((duration_seconds / 3600) * 10));
+    // Recompute success authoritatively: success only if caller asserts AND all tasks completed.
+    const allTasksDone = (tasks ?? []).length > 0 && (tasks ?? []).every((t: any) => t.completed);
+    const finalSucceeded = succeeded && allTasksDone;
 
-    // Determine per-user success: task completion fully done if user has tasks; otherwise rely on timer
-    const userSucceeded: Record<string, boolean> = {};
-    for (const uid of memberIds) {
-      const t = tasksByUser[uid] ?? { total: 0, done: 0 };
-      const tasksOk = t.total === 0 ? true : t.done === t.total;
-      userSucceeded[uid] = succeeded && tasksOk && minDuration;
-    }
-
-    const allSucceeded = memberIds.every((u) => userSucceeded[u]) && memberIds.length > 0;
-    const groupFailed = isGroup && !allSucceeded;
-    const soloFailed = !isGroup && memberIds.length === 1 && !userSucceeded[memberIds[0]];
+    // New reward rule: 5 stars per recorded hour, regardless of success/failure.
+    const earnedStars = Math.max(0, Math.floor((duration_seconds / 3600) * 5));
 
     const today = new Date().toISOString().slice(0, 10);
 
     for (const uid of memberIds) {
-      let starsDelta = 0;
-      let flamesDelta = 0;
-      const ok = userSucceeded[uid];
       const t = tasksByUser[uid] ?? { total: 0, done: 0 };
+      const starsDelta = earnedStars;
+      let flamesDelta = 0;
 
-      if (ok && minDuration) {
-        starsDelta = baseStars;
-        if (isGroup && allSucceeded) starsDelta += 2;
-      } else if (!minDuration) {
-        starsDelta = 0;
-      } else if (groupFailed) {
-        starsDelta = -2;
-        if (!ok) starsDelta -= 3;
-      } else if (soloFailed) {
-        starsDelta = -2;
-      }
-
-      // Update profile
       const { data: profile } = await admin
         .from('profiles').select('*').eq('id', uid).single();
       if (!profile) continue;
 
-      let newStars = Math.max(0, (profile.stars ?? 0) + starsDelta);
+      const newStars = Math.max(0, (profile.stars ?? 0) + starsDelta);
       let newFlames = profile.blue_flames ?? 0;
       let newSessionsCompleted = profile.sessions_completed ?? 0;
-      let newTotalSeconds = profile.total_seconds ?? 0;
+      let newTotalSeconds = (profile.total_seconds ?? 0) + duration_seconds;
       let newStreak = profile.current_streak ?? 0;
       let newLastDate = profile.last_session_date;
 
-      if (ok) {
+      if (finalSucceeded) {
         newSessionsCompleted += 1;
-        newTotalSeconds += duration_seconds;
-        // streak
         if (profile.last_session_date) {
           const last = new Date(profile.last_session_date);
           const diff = Math.floor((Date.parse(today) - last.getTime()) / 86400000);
@@ -135,16 +106,8 @@ Deno.serve(async (req) => {
           newStreak = 1;
         }
         newLastDate = today;
-        // every 10 completed
-        if (newSessionsCompleted % 10 === 0) {
-          newFlames += 1;
-          flamesDelta += 1;
-        }
-        // 7-day streak
-        if (newStreak === 7) {
-          newFlames += 1;
-          flamesDelta += 1;
-        }
+        if (newSessionsCompleted % 10 === 0) { newFlames += 1; flamesDelta += 1; }
+        if (newStreak === 7) { newFlames += 1; flamesDelta += 1; }
       }
 
       await admin.from('profiles').update({
@@ -161,7 +124,7 @@ Deno.serve(async (req) => {
         session_id, user_id: uid,
         stars_delta: starsDelta,
         flames_delta: flamesDelta,
-        succeeded: ok,
+        succeeded: finalSucceeded,
         tasks_completed: t.done,
         tasks_total: t.total,
         duration_seconds,
@@ -169,16 +132,16 @@ Deno.serve(async (req) => {
 
       await admin.from('study_logs').insert({
         user_id: uid, session_id,
-        duration_seconds, succeeded: ok, date: today,
+        duration_seconds, succeeded: finalSucceeded, date: today,
       });
     }
 
     await admin.from('sessions').update({
-      status: allSucceeded ? 'completed' : 'failed',
+      status: finalSucceeded ? 'completed' : 'failed',
       ended_at: new Date().toISOString(),
     }).eq('id', session_id);
 
-    return json({ ok: true, succeeded: allSucceeded });
+    return json({ ok: true, succeeded: finalSucceeded });
   } catch (e: any) {
     console.error(e);
     return json({ error: e?.message ?? 'error' }, 500);
