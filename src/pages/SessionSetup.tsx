@@ -383,10 +383,10 @@ const SessionSetup = () => {
                       const count = memberTaskCounts[m.user_id] ?? 0;
                       const ready = count > 0;
                       return (
-                        <li key={m.user_id} className="flex items-center justify-between">
-                          <span>@{m.profile?.username ?? "guest"}{m.user_id === user?.id && " (you)"}</span>
-                          <span className={ready ? "text-olive" : "text-taupe italic"}>
-                            {ready ? `Ready · ${count} task${count > 1 ? "s" : ""}` : "Awaiting tasks…"}
+                        <li key={m.user_id} className="flex items-center justify-between gap-2 min-w-0">
+                          <span className="truncate min-w-0">@{m.profile?.username ?? "guest"}{m.user_id === user?.id && " (you)"}</span>
+                          <span className={`shrink-0 text-right ${ready ? "text-olive" : "text-taupe italic"}`}>
+                            {ready ? `Ready · ${count}` : "Awaiting…"}
                           </span>
                         </li>
                       );
