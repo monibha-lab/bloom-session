@@ -508,25 +508,49 @@ function buildRtcConfig(): RTCConfiguration {
   const turnUrlEnv = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
   const turnUser = (import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined) || METERED_DEFAULTS.user;
   const turnCred = (import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined) || METERED_DEFAULTS.cred;
-  const turnUrls = turnUrlEnv ? [turnUrlEnv] : METERED_DEFAULTS.turnUrls;
-  const iceServers: RTCIceServer[] = [];
-  if (stunUrl) iceServers.push({ urls: stunUrl });
+  const envTurnUrls = turnUrlEnv?.split(/[\s,]+/).map(url => url.trim()).filter(Boolean) ?? [];
+  const turnUrls = envTurnUrls.some(url => url.includes("global.relay.metered.ca")) || envTurnUrls.length === 0
+    ? METERED_DEFAULTS.turnUrls
+    : envTurnUrls;
   const turnReady = !!(turnUrls.length && turnUser && turnCred);
   if (turnReady) {
-    iceServers.push({ urls: turnUrls, username: turnUser, credential: turnCred });
+    return {
+      iceTransportPolicy: "relay",
+      iceServers: [
+        { urls: [stunUrl] },
+        { urls: turnUrls, username: turnUser, credential: turnCred },
+      ],
+    };
   }
-  const config: RTCConfiguration = { iceServers };
-  // Force relay when TURN is configured to ensure cross-network reliability.
-  if (turnReady) (config as any).iceTransportPolicy = "relay";
-  return config;
+  return { iceTransportPolicy: "all", iceServers: stunUrl ? [{ urls: [stunUrl] }] : [] };
 }
 const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
 const HAS_STUN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("stun"));
 const HAS_TURN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("turn"));
 const ICE_POLICY = (RTC_CONFIG as any).iceTransportPolicy || "all";
-console.log(`[WebRTC] STUN configured: ${HAS_STUN} | TURN configured: ${HAS_TURN} | ICE policy: ${ICE_POLICY}`);
+console.log(`[WebRTC] TURN configured: ${HAS_TURN} | ICE policy: ${ICE_POLICY} | ICE servers: ${RTC_CONFIG.iceServers?.length ?? 0}`);
 const ICE_TIMEOUT_MS = 15000;
 const MAX_PEERS = 6;
+
+type SignalKind = "offer" | "answer" | "ice";
+type SignalPayload = {
+  session_id?: string;
+  from_user_id?: string;
+  to_user_id?: string;
+  from?: string;
+  to?: string;
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+};
+
+const peerLabel = (peerId: string) => peerId.slice(0, 6);
+
+const candidateType = (candidate: RTCIceCandidate | RTCIceCandidateInit | null | undefined) => {
+  const explicitType = (candidate as any)?.type as string | undefined;
+  if (explicitType) return explicitType;
+  const text = (candidate as any)?.candidate as string | undefined;
+  return text?.match(/ typ (host|srflx|prflx|relay)( |$)/)?.[1] ?? "unknown";
+};
 
 function PeopleGrid({ members, sessionId, userId }: { members: Member[]; sessionId: string; userId?: string }) {
   const [camOn, setCamOn] = useState(false);
