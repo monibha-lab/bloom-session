@@ -807,14 +807,36 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
   member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [hasFrames, setHasFrames] = useState(false);
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = stream ?? null;
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.srcObject !== (stream ?? null)) {
+      v.srcObject = stream ?? null;
+      setHasFrames(false);
+    }
+    if (!stream) return;
+    const onPlaying = () => setHasFrames(true);
+    v.addEventListener("playing", onPlaying);
+    v.addEventListener("loadeddata", onPlaying);
+    return () => {
+      v.removeEventListener("playing", onPlaying);
+      v.removeEventListener("loadeddata", onPlaying);
+    };
   }, [stream]);
   const initials = (member.profile?.username ?? "?").trim().slice(0, 2).toUpperCase();
+  const showVideo = camOn && !!stream;
   return (
     <div className="aspect-video bg-cocoa relative overflow-hidden border border-border/60">
-      {camOn && stream ? (
-        <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
+      {showVideo ? (
+        <>
+          <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
+          {!isMe && !hasFrames && (
+            <div className="absolute inset-0 grid place-items-center bg-cocoa/70">
+              <div className="text-[10px] uppercase tracking-widest text-ivory/80">Connecting video…</div>
+            </div>
+          )}
+        </>
       ) : (
         <div className="w-full h-full grid place-items-center bg-sand">
           <div className="text-center">
