@@ -672,8 +672,12 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
       const pc = peersRef.current.get(peerId);
       if (!pc) return;
       if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
-        setIceFailed(prev => ({ ...prev, [peerId]: true }));
-        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+        const relays = relayCandidateCountRef.current.get(peerId) ?? 0;
+        const message = ICE_POLICY === "relay" && relays === 0
+          ? "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota."
+          : "TURN candidates gathered, but signaling or peer negotiation failed.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
       }
     }, ICE_TIMEOUT_MS);
     iceTimersRef.current.set(peerId, t as unknown as number);
@@ -684,48 +688,72 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peersRef.current.set(peerId, pc);
     makingOfferRef.current.set(peerId, false);
+    ignoreOfferRef.current.set(peerId, false);
+    relayCandidateCountRef.current.set(peerId, 0);
 
     if (localStreamRef.current) attachLocalTracksToPeer(pc);
 
     pc.ontrack = (e) => {
-      setRemoteStreams(prev => ({ ...prev, [peerId]: e.streams[0] }));
+      console.log(`[WebRTC] remote track received from ${peerLabel(peerId)}: ${e.track.kind}`);
+      const [incoming] = e.streams;
+      setRemoteStreams(prev => {
+        const stream = prev[peerId] ?? incoming ?? new MediaStream();
+        if (!stream.getTracks().some(track => track.id === e.track.id)) stream.addTrack(e.track);
+        return { ...prev, [peerId]: stream };
+      });
+      e.track.onunmute = () => setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
     };
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        channelRef.current?.send({ type: "broadcast", event: "ice", payload: { from: userId, to: peerId, candidate: e.candidate } });
+        const type = candidateType(e.candidate);
+        if (type === "relay") relayCandidateCountRef.current.set(peerId, (relayCandidateCountRef.current.get(peerId) ?? 0) + 1);
+        console.log(`[WebRTC] candidate gathered for ${peerLabel(peerId)}: ${type}; relay total: ${relayCandidateCountRef.current.get(peerId) ?? 0}`);
+        sendSignal("ice", peerId, { candidate: e.candidate.toJSON() });
+      }
+    };
+    pc.onicegatheringstatechange = () => {
+      console.log(`[WebRTC] ICE gathering state for ${peerLabel(peerId)}: ${pc.iceGatheringState}`);
+      if (pc.iceGatheringState === "complete" && ICE_POLICY === "relay" && (relayCandidateCountRef.current.get(peerId) ?? 0) === 0) {
+        const message = "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
       }
     };
     pc.onnegotiationneeded = async () => {
       try {
         makingOfferRef.current.set(peerId, true);
         await pc.setLocalDescription();
-        channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: pc.localDescription } });
+        sendSignal("offer", peerId, { sdp: pc.localDescription?.toJSON() });
       } catch (e) {
-        console.error("negotiation failed");
+        console.error(`[WebRTC] negotiation failed for ${peerLabel(peerId)}`, (e as Error)?.name);
       } finally {
         makingOfferRef.current.set(peerId, false);
       }
     };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
-      console.log(`[WebRTC] peer ${peerId.slice(0,6)} ice: ${st}`);
+      console.log(`[WebRTC] ICE connection state for ${peerLabel(peerId)}: ${st}`);
       if (st === "checking" || st === "new") {
         startIceTimer(peerId);
       } else if (st === "connected" || st === "completed") {
         const t = iceTimersRef.current.get(peerId);
         if (t) window.clearTimeout(t);
-        setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+        setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
       } else if (st === "failed") {
-        setIceFailed(prev => ({ ...prev, [peerId]: true }));
-        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+        const relays = relayCandidateCountRef.current.get(peerId) ?? 0;
+        const message = ICE_POLICY === "relay" && relays === 0
+          ? "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota."
+          : "TURN candidates gathered, but signaling or peer negotiation failed.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
         try { pc.restartIce(); } catch {}
       }
     };
     pc.onconnectionstatechange = () => {
-      console.log(`[WebRTC] peer ${peerId.slice(0,6)} connection: ${pc.connectionState}`);
+      console.log(`[WebRTC] peer connection state for ${peerLabel(peerId)}: ${pc.connectionState}`);
     };
     return pc;
-  }, [userId]);
+  }, [sendSignal]);
 
   const closePeer = (peerId: string) => {
     const pc = peersRef.current.get(peerId);
