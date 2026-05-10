@@ -906,7 +906,8 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
                 ? "Waiting for media"
                 : (!camActive && !micActive ? "Camera off" : null);
           return (
-            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} status={status} />
+            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} status={status}
+              onRenderWarning={() => setPeerWarnings(prev => ({ ...prev, [m.user_id]: "Remote media track received, but video element did not render." }))} />
           );
         })}
       </div>
@@ -917,8 +918,8 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
   );
 }
 
-function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
-  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null;
+function RemoteTile({ member, stream, camOn, micOn, isMe, status, onRenderWarning }: {
+  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null; onRenderWarning?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasFrames, setHasFrames] = useState(false);
@@ -931,13 +932,20 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
     }
     if (!stream) return;
     const onPlaying = () => setHasFrames(true);
+    const renderTimer = window.setTimeout(() => {
+      if (!isMe && stream.getVideoTracks().length > 0 && v.videoWidth === 0) {
+        console.log(`[WebRTC] remote video track exists but videoWidth is 0 for ${member.user_id.slice(0, 6)}`);
+        onRenderWarning?.();
+      }
+    }, 3500);
     v.addEventListener("playing", onPlaying);
     v.addEventListener("loadeddata", onPlaying);
     return () => {
+      window.clearTimeout(renderTimer);
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("loadeddata", onPlaying);
     };
-  }, [stream]);
+  }, [isMe, member.user_id, onRenderWarning, stream]);
   const initials = (member.profile?.username ?? "?").trim().slice(0, 2).toUpperCase();
   const showVideo = camOn && !!stream;
   return (
@@ -947,7 +955,7 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
           <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
           {!isMe && !hasFrames && (
             <div className="absolute inset-0 grid place-items-center bg-cocoa/70">
-              <div className="text-[10px] uppercase tracking-widest text-ivory/80">Connecting video…</div>
+              <div className="text-[10px] uppercase tracking-widest text-ivory/80 text-center px-2">{status ?? "Connecting video…"}</div>
             </div>
           )}
         </>
