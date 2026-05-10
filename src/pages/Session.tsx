@@ -504,29 +504,49 @@ const METERED_DEFAULTS = {
   cred: "JMUIK1fpGE3dVz9Z",
 };
 function buildRtcConfig(): RTCConfiguration {
-  const stunUrl = (import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined) || METERED_DEFAULTS.stun;
-  const turnUrlEnv = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
-  const turnUser = (import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined) || METERED_DEFAULTS.user;
-  const turnCred = (import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined) || METERED_DEFAULTS.cred;
-  const turnUrls = turnUrlEnv ? [turnUrlEnv] : METERED_DEFAULTS.turnUrls;
-  const iceServers: RTCIceServer[] = [];
-  if (stunUrl) iceServers.push({ urls: stunUrl });
+  const stunUrl = METERED_DEFAULTS.stun;
+  const turnUser = METERED_DEFAULTS.user;
+  const turnCred = METERED_DEFAULTS.cred;
+  const turnUrls = METERED_DEFAULTS.turnUrls;
   const turnReady = !!(turnUrls.length && turnUser && turnCred);
   if (turnReady) {
-    iceServers.push({ urls: turnUrls, username: turnUser, credential: turnCred });
+    return {
+      iceTransportPolicy: "relay",
+      iceServers: [
+        { urls: [stunUrl] },
+        { urls: turnUrls, username: turnUser, credential: turnCred },
+      ],
+    };
   }
-  const config: RTCConfiguration = { iceServers };
-  // Force relay when TURN is configured to ensure cross-network reliability.
-  if (turnReady) (config as any).iceTransportPolicy = "relay";
-  return config;
+  return { iceTransportPolicy: "all", iceServers: stunUrl ? [{ urls: [stunUrl] }] : [] };
 }
 const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
 const HAS_STUN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("stun"));
 const HAS_TURN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("turn"));
 const ICE_POLICY = (RTC_CONFIG as any).iceTransportPolicy || "all";
-console.log(`[WebRTC] STUN configured: ${HAS_STUN} | TURN configured: ${HAS_TURN} | ICE policy: ${ICE_POLICY}`);
+console.log(`[WebRTC] TURN configured: ${HAS_TURN} | ICE policy: ${ICE_POLICY} | ICE servers: ${RTC_CONFIG.iceServers?.length ?? 0}`);
 const ICE_TIMEOUT_MS = 15000;
 const MAX_PEERS = 6;
+
+type SignalKind = "offer" | "answer" | "ice";
+type SignalPayload = {
+  session_id?: string;
+  from_user_id?: string;
+  to_user_id?: string;
+  from?: string;
+  to?: string;
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+};
+
+const peerLabel = (peerId: string) => peerId.slice(0, 6);
+
+const candidateType = (candidate: RTCIceCandidate | RTCIceCandidateInit | null | undefined) => {
+  const explicitType = (candidate as any)?.type as string | undefined;
+  if (explicitType) return explicitType;
+  const text = (candidate as any)?.candidate as string | undefined;
+  return text?.match(/ typ (host|srflx|prflx|relay)( |$)/)?.[1] ?? "unknown";
+};
 
 function PeopleGrid({ members, sessionId, userId }: { members: Member[]; sessionId: string; userId?: string }) {
   const [camOn, setCamOn] = useState(false);
@@ -535,12 +555,47 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+  const ignoreOfferRef = useRef<Map<string, boolean>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const relayCandidateCountRef = useRef<Map<string, number>>(new Map());
   const iceTimersRef = useRef<Map<string, number>>(new Map());
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteMuted, setRemoteMuted] = useState<Record<string, { cam: boolean; mic: boolean }>>({});
-  const [iceFailed, setIceFailed] = useState<Record<string, boolean>>({});
+  const [peerWarnings, setPeerWarnings] = useState<Record<string, string>>({});
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const [, force] = useState(0);
+
+  const sendSignal = useCallback((event: SignalKind, toUserId: string, payload: Omit<SignalPayload, "session_id" | "from_user_id" | "to_user_id" | "from" | "to">) => {
+    if (!channelRef.current || !userId) return;
+    console.log(`[WebRTC] ${event === "ice" ? "ICE candidate" : event} sent to ${peerLabel(toUserId)}`);
+    channelRef.current.send({
+      type: "broadcast",
+      event,
+      payload: { session_id: sessionId, from_user_id: userId, to_user_id: toUserId, ...payload },
+    });
+  }, [sessionId, userId]);
+
+  const readSignal = useCallback((payload: SignalPayload) => {
+    const from = payload.from_user_id ?? payload.from;
+    const to = payload.to_user_id ?? payload.to;
+    if (!from || !to) return null;
+    if (payload.session_id && payload.session_id !== sessionId) return null;
+    if (from === userId || to !== userId) return null;
+    return { from, to };
+  }, [sessionId, userId]);
+
+  const flushQueuedCandidates = useCallback(async (peerId: string, pc: RTCPeerConnection) => {
+    const queued = pendingCandidatesRef.current.get(peerId) ?? [];
+    if (!queued.length || !pc.remoteDescription) return;
+    pendingCandidatesRef.current.delete(peerId);
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error(`[WebRTC] add queued ICE candidate failed for ${peerLabel(peerId)}`, (e as Error)?.name);
+      }
+    }
+  }, []);
 
   const broadcastState = useCallback((cam: boolean, mic: boolean) => {
     channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
@@ -562,6 +617,17 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
 
   const removeLocalTracksFromPeer = (pc: RTCPeerConnection) => {
     pc.getSenders().forEach(s => { if (s.track) { try { pc.removeTrack(s); } catch {} } });
+  };
+
+  const ensureRecvTransceivers = (pc: RTCPeerConnection) => {
+    try {
+      if (!pc.getTransceivers().some(t => t.receiver.track.kind === "video")) {
+        pc.addTransceiver("video", { direction: "recvonly" });
+      }
+      if (!pc.getTransceivers().some(t => t.receiver.track.kind === "audio")) {
+        pc.addTransceiver("audio", { direction: "recvonly" });
+      }
+    } catch {}
   };
 
   const ensureLocalStream = useCallback(async (wantCam: boolean, wantMic: boolean) => {
@@ -613,8 +679,12 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
       const pc = peersRef.current.get(peerId);
       if (!pc) return;
       if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
-        setIceFailed(prev => ({ ...prev, [peerId]: true }));
-        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+        const relays = relayCandidateCountRef.current.get(peerId) ?? 0;
+        const message = ICE_POLICY === "relay" && relays === 0
+          ? "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota."
+          : "TURN candidates gathered, but signaling or peer negotiation failed.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
       }
     }, ICE_TIMEOUT_MS);
     iceTimersRef.current.set(peerId, t as unknown as number);
@@ -625,48 +695,79 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peersRef.current.set(peerId, pc);
     makingOfferRef.current.set(peerId, false);
+    ignoreOfferRef.current.set(peerId, false);
+    relayCandidateCountRef.current.set(peerId, 0);
 
     if (localStreamRef.current) attachLocalTracksToPeer(pc);
 
     pc.ontrack = (e) => {
-      setRemoteStreams(prev => ({ ...prev, [peerId]: e.streams[0] }));
+      console.log(`[WebRTC] remote track received from ${peerLabel(peerId)}: ${e.track.kind}`);
+      const [incoming] = e.streams;
+      setRemoteMuted(prev => ({
+        ...prev,
+        [peerId]: {
+          cam: e.track.kind === "video" ? true : (prev[peerId]?.cam ?? false),
+          mic: e.track.kind === "audio" ? true : (prev[peerId]?.mic ?? false),
+        },
+      }));
+      setRemoteStreams(prev => {
+        const stream = prev[peerId] ?? incoming ?? new MediaStream();
+        if (!stream.getTracks().some(track => track.id === e.track.id)) stream.addTrack(e.track);
+        return { ...prev, [peerId]: stream };
+      });
+      e.track.onunmute = () => setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
     };
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        channelRef.current?.send({ type: "broadcast", event: "ice", payload: { from: userId, to: peerId, candidate: e.candidate } });
+        const type = candidateType(e.candidate);
+        if (type === "relay") relayCandidateCountRef.current.set(peerId, (relayCandidateCountRef.current.get(peerId) ?? 0) + 1);
+        console.log(`[WebRTC] candidate gathered for ${peerLabel(peerId)}: ${type}; relay total: ${relayCandidateCountRef.current.get(peerId) ?? 0}`);
+        sendSignal("ice", peerId, { candidate: e.candidate.toJSON() });
+      }
+    };
+    pc.onicegatheringstatechange = () => {
+      console.log(`[WebRTC] ICE gathering state for ${peerLabel(peerId)}: ${pc.iceGatheringState}`);
+      if (pc.iceGatheringState === "complete" && ICE_POLICY === "relay" && (relayCandidateCountRef.current.get(peerId) ?? 0) === 0) {
+        const message = "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
       }
     };
     pc.onnegotiationneeded = async () => {
       try {
         makingOfferRef.current.set(peerId, true);
         await pc.setLocalDescription();
-        channelRef.current?.send({ type: "broadcast", event: "offer", payload: { from: userId, to: peerId, sdp: pc.localDescription } });
+        sendSignal("offer", peerId, { sdp: pc.localDescription?.toJSON() });
       } catch (e) {
-        console.error("negotiation failed");
+        console.error(`[WebRTC] negotiation failed for ${peerLabel(peerId)}`, (e as Error)?.name);
       } finally {
         makingOfferRef.current.set(peerId, false);
       }
     };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
-      console.log(`[WebRTC] peer ${peerId.slice(0,6)} ice: ${st}`);
+      console.log(`[WebRTC] ICE connection state for ${peerLabel(peerId)}: ${st}`);
       if (st === "checking" || st === "new") {
         startIceTimer(peerId);
       } else if (st === "connected" || st === "completed") {
         const t = iceTimersRef.current.get(peerId);
         if (t) window.clearTimeout(t);
-        setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+        setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
       } else if (st === "failed") {
-        setIceFailed(prev => ({ ...prev, [peerId]: true }));
-        toast.error("Video connection could not be established on this network. Try another network or continue without video.");
+        const relays = relayCandidateCountRef.current.get(peerId) ?? 0;
+        const message = ICE_POLICY === "relay" && relays === 0
+          ? "TURN server did not return relay candidates. Check TURN URL, username, credential, or provider quota."
+          : "TURN candidates gathered, but signaling or peer negotiation failed.";
+        setPeerWarnings(prev => ({ ...prev, [peerId]: message }));
+        toast.error(message);
         try { pc.restartIce(); } catch {}
       }
     };
     pc.onconnectionstatechange = () => {
-      console.log(`[WebRTC] peer ${peerId.slice(0,6)} connection: ${pc.connectionState}`);
+      console.log(`[WebRTC] peer connection state for ${peerLabel(peerId)}: ${pc.connectionState}`);
     };
     return pc;
-  }, [userId]);
+  }, [sendSignal]);
 
   const closePeer = (peerId: string) => {
     const pc = peersRef.current.get(peerId);
@@ -677,7 +778,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     iceTimersRef.current.delete(peerId);
     setRemoteStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
     setRemoteMuted(prev => { const n = { ...prev }; delete n[peerId]; return n; });
-    setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    makingOfferRef.current.delete(peerId);
+    ignoreOfferRef.current.delete(peerId);
+    pendingCandidatesRef.current.delete(peerId);
+    relayCandidateCountRef.current.delete(peerId);
   };
 
   useEffect(() => {
@@ -686,12 +791,15 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     channelRef.current = ch;
 
     ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const polite = userId > payload.from;
-      const pc = peersRef.current.get(payload.from) ?? createPeer(payload.from, polite);
-      const making = makingOfferRef.current.get(payload.from) || false;
+      const signal = readSignal(payload);
+      if (!signal) return;
+      console.log(`[WebRTC] offer received from ${peerLabel(signal.from)}`);
+      const polite = userId > signal.from;
+      const pc = peersRef.current.get(signal.from) ?? createPeer(signal.from, polite);
+      const making = makingOfferRef.current.get(signal.from) || false;
       const offerCollision = making || pc.signalingState !== "stable";
-      if (offerCollision && !polite) return;
+      ignoreOfferRef.current.set(signal.from, !polite && offerCollision);
+      if (ignoreOfferRef.current.get(signal.from)) return;
       try {
         if (offerCollision) {
           await Promise.all([
@@ -701,24 +809,37 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         } else {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
+        await flushQueuedCandidates(signal.from, pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: pc.localDescription } });
-      } catch (e) { console.error("answer failed"); }
+        sendSignal("answer", signal.from, { sdp: pc.localDescription?.toJSON() });
+      } catch (e) { console.error(`[WebRTC] answer failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "answer" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const pc = peersRef.current.get(payload.from);
+      const signal = readSignal(payload);
+      if (!signal) return;
+      console.log(`[WebRTC] answer received from ${peerLabel(signal.from)}`);
+      const pc = peersRef.current.get(signal.from);
       if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)); }
-      catch (e) { console.error("setRemoteDescription answer"); }
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        await flushQueuedCandidates(signal.from, pc);
+      }
+      catch (e) { console.error(`[WebRTC] set answer failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const pc = peersRef.current.get(payload.from);
+      const signal = readSignal(payload);
+      if (!signal || !payload.candidate) return;
+      console.log(`[WebRTC] ICE candidate received from ${peerLabel(signal.from)}: ${candidateType(payload.candidate)}`);
+      const pc = peersRef.current.get(signal.from);
       if (!pc) return;
+      if (!pc.remoteDescription) {
+        const queued = pendingCandidatesRef.current.get(signal.from) ?? [];
+        pendingCandidatesRef.current.set(signal.from, [...queued, payload.candidate]);
+        return;
+      }
       try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); }
-      catch (e) { console.error("addIceCandidate"); }
+      catch (e) { console.error(`[WebRTC] add ICE candidate failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "media-state" }, ({ payload }) => {
       if (!payload?.from || payload.from === userId) return;
@@ -726,14 +847,9 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     });
     ch.on("presence", { event: "join" }, ({ key }) => {
       if (key === userId) return;
-      if (userId < key && peersRef.current.size < MAX_PEERS) {
-        const pc = createPeer(key, false);
-        try {
-          if (pc.getTransceivers().length === 0) {
-            pc.addTransceiver("video", { direction: "recvonly" });
-            pc.addTransceiver("audio", { direction: "recvonly" });
-          }
-        } catch {}
+      if (peersRef.current.size < MAX_PEERS) {
+        const pc = createPeer(key, userId > key);
+        ensureRecvTransceivers(pc);
       }
     });
     ch.on("presence", { event: "leave" }, ({ key }) => {
@@ -743,6 +859,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     ch.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         await ch.track({ user_id: userId });
+        console.log(`[WebRTC] signaling subscribed for session ${sessionId.slice(0, 6)}`);
+        Object.keys(ch.presenceState()).filter(key => key !== userId).slice(0, MAX_PEERS).forEach(key => {
+          const pc = createPeer(key, userId > key);
+          ensureRecvTransceivers(pc);
+        });
         // Re-broadcast our current media state so late joiners learn it
         broadcastState(camOn, micOn);
       }
@@ -786,13 +907,14 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
           const micActive = isMe ? micOn : (mediaState?.mic ?? false);
           const status = isMe
             ? (camOn || micOn ? null : "Camera off")
-            : iceFailed[m.user_id]
-              ? "Connection failed"
+            : peerWarnings[m.user_id]
+              ? peerWarnings[m.user_id]
               : mediaState === undefined
                 ? "Waiting for media"
                 : (!camActive && !micActive ? "Camera off" : null);
           return (
-            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} status={status} />
+            <RemoteTile key={m.user_id} member={m} stream={stream} camOn={camActive} micOn={micActive} isMe={isMe} status={status}
+              onRenderWarning={() => setPeerWarnings(prev => ({ ...prev, [m.user_id]: "Remote media track received, but video element did not render." }))} />
           );
         })}
       </div>
@@ -803,8 +925,8 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
   );
 }
 
-function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
-  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null;
+function RemoteTile({ member, stream, camOn, micOn, isMe, status, onRenderWarning }: {
+  member: Member; stream: MediaStream | null | undefined; camOn: boolean; micOn: boolean; isMe: boolean; status?: string | null; onRenderWarning?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasFrames, setHasFrames] = useState(false);
@@ -817,13 +939,20 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
     }
     if (!stream) return;
     const onPlaying = () => setHasFrames(true);
+    const renderTimer = window.setTimeout(() => {
+      if (!isMe && stream.getVideoTracks().length > 0 && v.videoWidth === 0) {
+        console.log(`[WebRTC] remote video track exists but videoWidth is 0 for ${member.user_id.slice(0, 6)}`);
+        onRenderWarning?.();
+      }
+    }, 3500);
     v.addEventListener("playing", onPlaying);
     v.addEventListener("loadeddata", onPlaying);
     return () => {
+      window.clearTimeout(renderTimer);
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("loadeddata", onPlaying);
     };
-  }, [stream]);
+  }, [isMe, member.user_id, onRenderWarning, stream]);
   const initials = (member.profile?.username ?? "?").trim().slice(0, 2).toUpperCase();
   const showVideo = camOn && !!stream;
   return (
@@ -833,7 +962,7 @@ function RemoteTile({ member, stream, camOn, micOn, isMe, status }: {
           <video ref={videoRef} autoPlay playsInline muted={isMe} className="w-full h-full object-cover" />
           {!isMe && !hasFrames && (
             <div className="absolute inset-0 grid place-items-center bg-cocoa/70">
-              <div className="text-[10px] uppercase tracking-widest text-ivory/80">Connecting video…</div>
+              <div className="text-[10px] uppercase tracking-widest text-ivory/80 text-center px-2">{status ?? "Connecting video…"}</div>
             </div>
           )}
         </>
