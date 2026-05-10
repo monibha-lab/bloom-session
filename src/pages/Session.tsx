@@ -649,6 +649,7 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
+      console.log(`[WebRTC] peer ${peerId.slice(0,6)} ice: ${st}`);
       if (st === "checking" || st === "new") {
         startIceTimer(peerId);
       } else if (st === "connected" || st === "completed") {
@@ -664,8 +665,6 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     pc.onconnectionstatechange = () => {
       console.log(`[WebRTC] peer ${peerId.slice(0,6)} connection: ${pc.connectionState}`);
     };
-    pc.oniceconnectionstatechange && (pc as any)._origIceLog ||
-      console.log(`[WebRTC] peer ${peerId.slice(0,6)} ice init: ${pc.iceConnectionState}`);
     return pc;
   }, [userId]);
 
