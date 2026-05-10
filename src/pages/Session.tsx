@@ -822,7 +822,7 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     });
     ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
       const signal = readSignal(payload);
-      if (!signal) return;
+      if (!signal || !payload.candidate) return;
       console.log(`[WebRTC] ICE candidate received from ${peerLabel(signal.from)}: ${candidateType(payload.candidate)}`);
       const pc = peersRef.current.get(signal.from);
       if (!pc) return;
@@ -840,14 +840,9 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     });
     ch.on("presence", { event: "join" }, ({ key }) => {
       if (key === userId) return;
-      if (userId < key && peersRef.current.size < MAX_PEERS) {
-        const pc = createPeer(key, false);
-        try {
-          if (pc.getTransceivers().length === 0) {
-            pc.addTransceiver("video", { direction: "recvonly" });
-            pc.addTransceiver("audio", { direction: "recvonly" });
-          }
-        } catch {}
+      if (peersRef.current.size < MAX_PEERS) {
+        const pc = createPeer(key, userId > key);
+        ensureRecvTransceivers(pc);
       }
     });
     ch.on("presence", { event: "leave" }, ({ key }) => {
@@ -857,6 +852,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     ch.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         await ch.track({ user_id: userId });
+        console.log(`[WebRTC] signaling subscribed for session ${sessionId.slice(0, 6)}`);
+        Object.keys(ch.presenceState()).filter(key => key !== userId).slice(0, MAX_PEERS).forEach(key => {
+          const pc = createPeer(key, userId > key);
+          ensureRecvTransceivers(pc);
+        });
         // Re-broadcast our current media state so late joiners learn it
         broadcastState(camOn, micOn);
       }
