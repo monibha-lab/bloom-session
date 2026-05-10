@@ -494,18 +494,21 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
 // Mesh P2P with Supabase Realtime broadcast as signaling.
 // STUN always on; TURN added when all VITE_WEBRTC_TURN_* env vars are present.
 function buildRtcConfig(): RTCConfiguration {
-  const stunUrl = (import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined) || "stun:stun.l.google.com:19302";
+  const stunUrl = import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined;
   const turnUrl = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
   const turnUser = import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined;
   const turnCred = import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined;
-  const iceServers: RTCIceServer[] = [{ urls: stunUrl }];
+  const iceServers: RTCIceServer[] = [];
+  if (stunUrl) iceServers.push({ urls: stunUrl });
   if (turnUrl && turnUser && turnCred) {
     iceServers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
   }
   return { iceServers };
 }
 const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
+const HAS_STUN = !!import.meta.env.VITE_WEBRTC_STUN_URL;
 const HAS_TURN = !!(import.meta.env.VITE_WEBRTC_TURN_URL && import.meta.env.VITE_WEBRTC_TURN_USERNAME && import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL);
+console.log(`[WebRTC] STUN configured: ${HAS_STUN} | TURN configured: ${HAS_TURN}`);
 const ICE_TIMEOUT_MS = 15000;
 const MAX_PEERS = 6;
 
