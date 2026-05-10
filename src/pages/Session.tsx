@@ -764,7 +764,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     iceTimersRef.current.delete(peerId);
     setRemoteStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
     setRemoteMuted(prev => { const n = { ...prev }; delete n[peerId]; return n; });
-    setIceFailed(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    setPeerWarnings(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+    makingOfferRef.current.delete(peerId);
+    ignoreOfferRef.current.delete(peerId);
+    pendingCandidatesRef.current.delete(peerId);
+    relayCandidateCountRef.current.delete(peerId);
   };
 
   useEffect(() => {
@@ -773,12 +777,15 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     channelRef.current = ch;
 
     ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const polite = userId > payload.from;
-      const pc = peersRef.current.get(payload.from) ?? createPeer(payload.from, polite);
-      const making = makingOfferRef.current.get(payload.from) || false;
+      const signal = readSignal(payload);
+      if (!signal) return;
+      console.log(`[WebRTC] offer received from ${peerLabel(signal.from)}`);
+      const polite = userId > signal.from;
+      const pc = peersRef.current.get(signal.from) ?? createPeer(signal.from, polite);
+      const making = makingOfferRef.current.get(signal.from) || false;
       const offerCollision = making || pc.signalingState !== "stable";
-      if (offerCollision && !polite) return;
+      ignoreOfferRef.current.set(signal.from, !polite && offerCollision);
+      if (ignoreOfferRef.current.get(signal.from)) return;
       try {
         if (offerCollision) {
           await Promise.all([
@@ -788,24 +795,37 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         } else {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
+        await flushQueuedCandidates(signal.from, pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        ch.send({ type: "broadcast", event: "answer", payload: { from: userId, to: payload.from, sdp: pc.localDescription } });
-      } catch (e) { console.error("answer failed"); }
+        sendSignal("answer", signal.from, { sdp: pc.localDescription?.toJSON() });
+      } catch (e) { console.error(`[WebRTC] answer failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "answer" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const pc = peersRef.current.get(payload.from);
+      const signal = readSignal(payload);
+      if (!signal) return;
+      console.log(`[WebRTC] answer received from ${peerLabel(signal.from)}`);
+      const pc = peersRef.current.get(signal.from);
       if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp)); }
-      catch (e) { console.error("setRemoteDescription answer"); }
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        await flushQueuedCandidates(signal.from, pc);
+      }
+      catch (e) { console.error(`[WebRTC] set answer failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "ice" }, async ({ payload }) => {
-      if (payload.to !== userId) return;
-      const pc = peersRef.current.get(payload.from);
+      const signal = readSignal(payload);
+      if (!signal) return;
+      console.log(`[WebRTC] ICE candidate received from ${peerLabel(signal.from)}: ${candidateType(payload.candidate)}`);
+      const pc = peersRef.current.get(signal.from);
       if (!pc) return;
+      if (!pc.remoteDescription) {
+        const queued = pendingCandidatesRef.current.get(signal.from) ?? [];
+        pendingCandidatesRef.current.set(signal.from, [...queued, payload.candidate]);
+        return;
+      }
       try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); }
-      catch (e) { console.error("addIceCandidate"); }
+      catch (e) { console.error(`[WebRTC] add ICE candidate failed for ${peerLabel(signal.from)}`, (e as Error)?.name); }
     });
     ch.on("broadcast", { event: "media-state" }, ({ payload }) => {
       if (!payload?.from || payload.from === userId) return;
