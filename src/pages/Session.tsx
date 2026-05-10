@@ -893,8 +893,8 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
           const micActive = isMe ? micOn : (mediaState?.mic ?? false);
           const status = isMe
             ? (camOn || micOn ? null : "Camera off")
-            : iceFailed[m.user_id]
-              ? "Connection failed"
+            : peerWarnings[m.user_id]
+              ? peerWarnings[m.user_id]
               : mediaState === undefined
                 ? "Waiting for media"
                 : (!camActive && !micActive ? "Camera off" : null);
