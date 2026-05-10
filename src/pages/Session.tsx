@@ -619,6 +619,17 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     pc.getSenders().forEach(s => { if (s.track) { try { pc.removeTrack(s); } catch {} } });
   };
 
+  const ensureRecvTransceivers = (pc: RTCPeerConnection) => {
+    try {
+      if (!pc.getTransceivers().some(t => t.receiver.track.kind === "video")) {
+        pc.addTransceiver("video", { direction: "recvonly" });
+      }
+      if (!pc.getTransceivers().some(t => t.receiver.track.kind === "audio")) {
+        pc.addTransceiver("audio", { direction: "recvonly" });
+      }
+    } catch {}
+  };
+
   const ensureLocalStream = useCallback(async (wantCam: boolean, wantMic: boolean) => {
     if (!wantCam && !wantMic) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
