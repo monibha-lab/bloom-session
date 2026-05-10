@@ -492,23 +492,39 @@ function JigsawCanvas({ tasks, members, userId, templateUrl }: {
 
 /* ---------------- WebRTC People Grid ---------------- */
 // Mesh P2P with Supabase Realtime broadcast as signaling.
-// STUN always on; TURN added when all VITE_WEBRTC_TURN_* env vars are present.
+// Metered ICE defaults; overridable via VITE_WEBRTC_* env vars.
+const METERED_DEFAULTS = {
+  stun: "stun:stun.relay.metered.ca:80",
+  turnUrls: [
+    "turn:global.relay.metered.ca:80?transport=tcp",
+    "turn:global.relay.metered.ca:443",
+    "turns:global.relay.metered.ca:443?transport=tcp",
+  ],
+  user: "7994e1537e170f97269ef54d",
+  cred: "JMUIK1fpGE3dVz9Z",
+};
 function buildRtcConfig(): RTCConfiguration {
-  const stunUrl = import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined;
-  const turnUrl = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
-  const turnUser = import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined;
-  const turnCred = import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined;
+  const stunUrl = (import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined) || METERED_DEFAULTS.stun;
+  const turnUrlEnv = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
+  const turnUser = (import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined) || METERED_DEFAULTS.user;
+  const turnCred = (import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined) || METERED_DEFAULTS.cred;
+  const turnUrls = turnUrlEnv ? [turnUrlEnv] : METERED_DEFAULTS.turnUrls;
   const iceServers: RTCIceServer[] = [];
   if (stunUrl) iceServers.push({ urls: stunUrl });
-  if (turnUrl && turnUser && turnCred) {
-    iceServers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
+  const turnReady = !!(turnUrls.length && turnUser && turnCred);
+  if (turnReady) {
+    iceServers.push({ urls: turnUrls, username: turnUser, credential: turnCred });
   }
-  return { iceServers };
+  const config: RTCConfiguration = { iceServers };
+  // Force relay when TURN is configured to ensure cross-network reliability.
+  if (turnReady) (config as any).iceTransportPolicy = "relay";
+  return config;
 }
 const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
-const HAS_STUN = !!import.meta.env.VITE_WEBRTC_STUN_URL;
-const HAS_TURN = !!(import.meta.env.VITE_WEBRTC_TURN_URL && import.meta.env.VITE_WEBRTC_TURN_USERNAME && import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL);
-console.log(`[WebRTC] STUN configured: ${HAS_STUN} | TURN configured: ${HAS_TURN}`);
+const HAS_STUN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("stun"));
+const HAS_TURN = !!RTC_CONFIG.iceServers?.some(s => String(s.urls).includes("turn"));
+const ICE_POLICY = (RTC_CONFIG as any).iceTransportPolicy || "all";
+console.log(`[WebRTC] STUN configured: ${HAS_STUN} | TURN configured: ${HAS_TURN} | ICE policy: ${ICE_POLICY}`);
 const ICE_TIMEOUT_MS = 15000;
 const MAX_PEERS = 6;
 
