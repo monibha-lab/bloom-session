@@ -504,14 +504,10 @@ const METERED_DEFAULTS = {
   cred: "JMUIK1fpGE3dVz9Z",
 };
 function buildRtcConfig(): RTCConfiguration {
-  const stunUrl = (import.meta.env.VITE_WEBRTC_STUN_URL as string | undefined) || METERED_DEFAULTS.stun;
-  const turnUrlEnv = import.meta.env.VITE_WEBRTC_TURN_URL as string | undefined;
-  const turnUser = (import.meta.env.VITE_WEBRTC_TURN_USERNAME as string | undefined) || METERED_DEFAULTS.user;
-  const turnCred = (import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL as string | undefined) || METERED_DEFAULTS.cred;
-  const envTurnUrls = turnUrlEnv?.split(/[\s,]+/).map(url => url.trim()).filter(Boolean) ?? [];
-  const turnUrls = envTurnUrls.some(url => url.includes("global.relay.metered.ca")) || envTurnUrls.length === 0
-    ? METERED_DEFAULTS.turnUrls
-    : envTurnUrls;
+  const stunUrl = METERED_DEFAULTS.stun;
+  const turnUser = METERED_DEFAULTS.user;
+  const turnCred = METERED_DEFAULTS.cred;
+  const turnUrls = METERED_DEFAULTS.turnUrls;
   const turnReady = !!(turnUrls.length && turnUser && turnCred);
   if (turnReady) {
     return {
