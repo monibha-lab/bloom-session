@@ -703,6 +703,13 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
     pc.ontrack = (e) => {
       console.log(`[WebRTC] remote track received from ${peerLabel(peerId)}: ${e.track.kind}`);
       const [incoming] = e.streams;
+      setRemoteMuted(prev => ({
+        ...prev,
+        [peerId]: {
+          cam: e.track.kind === "video" ? true : (prev[peerId]?.cam ?? false),
+          mic: e.track.kind === "audio" ? true : (prev[peerId]?.mic ?? false),
+        },
+      }));
       setRemoteStreams(prev => {
         const stream = prev[peerId] ?? incoming ?? new MediaStream();
         if (!stream.getTracks().some(track => track.id === e.track.id)) stream.addTrack(e.track);
