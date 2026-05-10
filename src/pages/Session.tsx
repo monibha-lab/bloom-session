@@ -559,12 +559,47 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+  const ignoreOfferRef = useRef<Map<string, boolean>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const relayCandidateCountRef = useRef<Map<string, number>>(new Map());
   const iceTimersRef = useRef<Map<string, number>>(new Map());
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteMuted, setRemoteMuted] = useState<Record<string, { cam: boolean; mic: boolean }>>({});
-  const [iceFailed, setIceFailed] = useState<Record<string, boolean>>({});
+  const [peerWarnings, setPeerWarnings] = useState<Record<string, string>>({});
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const [, force] = useState(0);
+
+  const sendSignal = useCallback((event: SignalKind, toUserId: string, payload: Omit<SignalPayload, "session_id" | "from_user_id" | "to_user_id" | "from" | "to">) => {
+    if (!channelRef.current || !userId) return;
+    console.log(`[WebRTC] ${event === "ice" ? "ICE candidate" : event} sent to ${peerLabel(toUserId)}`);
+    channelRef.current.send({
+      type: "broadcast",
+      event,
+      payload: { session_id: sessionId, from_user_id: userId, to_user_id: toUserId, ...payload },
+    });
+  }, [sessionId, userId]);
+
+  const readSignal = useCallback((payload: SignalPayload) => {
+    const from = payload.from_user_id ?? payload.from;
+    const to = payload.to_user_id ?? payload.to;
+    if (!from || !to) return null;
+    if (payload.session_id && payload.session_id !== sessionId) return null;
+    if (from === userId || to !== userId) return null;
+    return { from, to };
+  }, [sessionId, userId]);
+
+  const flushQueuedCandidates = useCallback(async (peerId: string, pc: RTCPeerConnection) => {
+    const queued = pendingCandidatesRef.current.get(peerId) ?? [];
+    if (!queued.length || !pc.remoteDescription) return;
+    pendingCandidatesRef.current.delete(peerId);
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error(`[WebRTC] add queued ICE candidate failed for ${peerLabel(peerId)}`, (e as Error)?.name);
+      }
+    }
+  }, []);
 
   const broadcastState = useCallback((cam: boolean, mic: boolean) => {
     channelRef.current?.send({ type: "broadcast", event: "media-state", payload: { from: userId, cam, mic } });
