@@ -661,6 +661,11 @@ function PeopleGrid({ members, sessionId, userId }: { members: Member[]; session
         try { pc.restartIce(); } catch {}
       }
     };
+    pc.onconnectionstatechange = () => {
+      console.log(`[WebRTC] peer ${peerId.slice(0,6)} connection: ${pc.connectionState}`);
+    };
+    pc.oniceconnectionstatechange && (pc as any)._origIceLog ||
+      console.log(`[WebRTC] peer ${peerId.slice(0,6)} ice init: ${pc.iceConnectionState}`);
     return pc;
   }, [userId]);
 
